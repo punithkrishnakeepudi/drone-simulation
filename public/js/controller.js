@@ -414,7 +414,13 @@ function onPacket(m) {
       arena.isDefault = !!m.isDefault;
       rememberTeam(m.isDefault ? '' : m.team);
     }
-    if (showing('seats') || showing('name')) show(state.started ? 'tx' : 'pick');
+    if (showing('seats') || showing('name')) {
+      if (state.started) {
+        show(state.session === 'task' ? 'tasksheet' : 'tx');
+      } else {
+        show('pick');
+      }
+    }
     return;
   }
   if (m.t === 'seat/error') {
@@ -673,7 +679,13 @@ for (const b of document.querySelectorAll('.pick')) {
       else show('seats');
       return;
     }
+    
     cmd('session', which);
+    if (arena.seat == null) {
+      show('seats');
+      return;
+    }
+    
     show(which === 'task' ? 'tasksheet' : 'tx');
   };
 }
