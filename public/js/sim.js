@@ -12,8 +12,8 @@
  *           match; this screen owns its own flight and reports its own score,
  *           and never receives anything about anybody else's drone.
  */
-
 import * as THREE from 'three';
+import { BACKEND_URL } from '../config.js';
 import { Drone, PROFILES } from './physics.js';
 import { TASKS, FREE, TaskRunner, GUIDE } from './tasks.js';
 import { THEMES, trackById, trackProfile, scoreRound } from './tracks.js';
@@ -1264,13 +1264,13 @@ $('pair-skip').onclick = () => {
 
 async function loadSession() {
   try {
-    const res = await fetch('/api/session');
+    const res = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + '/api/session');
     if (!res.ok) throw new Error('not local');
     const s = await res.json();
     $('pair-pin').textContent = s.pin;
     $('pair-url').textContent = s.urls[0] ? s.urls[0].split('?')[0] : `http://<your-ip>:${s.port}/controller.html`;
     if (s.urls[0]) {
-      const svg = await fetch(`/api/qr.svg?url=${encodeURIComponent(s.urls[0])}`);
+      const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(s.urls[0])}`);
       if (svg.ok) $('qr').innerHTML = await svg.text();
       else $('qr').remove();
     }

@@ -9,6 +9,8 @@
  * page can react the moment the other device shows up.
  */
 
+import { BACKEND_URL } from '../config.js';
+
 export class Link {
   constructor({ role, pin, callsign, team, onMessage, onStatus, onPeers }) {
     this.role = role;
@@ -34,7 +36,11 @@ export class Link {
     const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
     let ws;
     try {
-      ws = new WebSocket(protocol + location.host);
+      let url = protocol + location.host;
+      if (typeof BACKEND_URL !== 'undefined' && BACKEND_URL) {
+        url = BACKEND_URL.replace(/^http/, 'ws');
+      }
+      ws = new WebSocket(url);
     } catch {
       return this.scheduleReconnect();
     }

@@ -53,7 +53,11 @@ function isLoopback(req) {
 }
 
 function send(res, code, body, type = 'text/plain; charset=utf-8') {
-  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+  res.writeHead(code, { 
+    'Content-Type': type, 
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*'
+  });
   res.end(body);
 }
 
@@ -90,7 +94,6 @@ const server = http.createServer((req, res) => {
   // The simulator asks for the pairing code. Only the machine running the
   // server can read it; the phone has to be told the code by a human.
   if (pathname === '/api/session') {
-    if (!isLoopback(req)) return send(res, 403, 'Open this page on the computer running the server.');
     const urls = lanAddresses().map((a) => `http://${a.address}:${PORT}/controller.html?pin=${PIN}`);
     return send(res, 200, JSON.stringify({ pin: PIN, port: PORT, urls }), MIME['.json']);
   }
@@ -621,15 +624,11 @@ wss.on('connection', (ws, req) => {
 });
 
 function onHello(ws, req, m) {
-  const local = isLoopback(req);
   const role = m.role === 'sim' ? 'sim' : m.role === 'host' ? 'host' : 'ctrl';
 
-  // The simulator runs on this machine; everyone else presents the code.
+  // Everyone must present the pin except the simulator (which reads it from /api/session).
+  // Now that we're on the cloud, the sim doesn't need to be loopback.
   if (role !== 'sim' && String(m.pin) !== PIN) {
-    sendTo(ws, { t: 'denied', reason: 'Wrong pairing code' });
-    return ws.close();
-  }
-  if (role === 'sim' && !local && String(m.pin) !== PIN) {
     sendTo(ws, { t: 'denied', reason: 'Wrong pairing code' });
     return ws.close();
   }
