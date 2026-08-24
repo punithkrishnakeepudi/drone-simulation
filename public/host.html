@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Drone Trainer — Arena host</title>
+<link rel="stylesheet" href="/css/sim.css" />
+<link rel="stylesheet" href="/css/host.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23070b14'/%3E%3Cpath d='M16 6 L22 24 L16 20 L10 24 Z' fill='%232fd39c'/%3E%3C/svg%3E" />
+</head>
+<body class="host">
+
+<!-- the code, for a host opened away from the machine running the server -->
+<div id="h-gate" class="overlay" hidden>
+  <div class="card">
+    <p class="eyebrow">Arena host</p>
+    <h1>Enter the pairing code</h1>
+    <p class="lede">It is printed in the terminal running the server, and on the simulator's pairing card.</p>
+    <input id="h-pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off" />
+    <button id="h-go" class="ghost">Connect</button>
+    <p class="err" id="h-err" role="alert"></p>
+  </div>
+</div>
+
+<header class="h-top">
+  <div>
+    <p class="eyebrow">Drone Trainer</p>
+    <h1>Arena</h1>
+  </div>
+  <div class="h-code">
+    <p class="field-label">Team code</p>
+    <p class="pin mint" id="h-team">----</p>
+  </div>
+  <div class="h-code">
+    <p class="field-label">Pairing code</p>
+    <p class="pin" id="h-code">····</p>
+  </div>
+  <div class="h-code">
+    <p class="field-label">Pilots join at</p>
+    <p class="url" id="h-url">…</p>
+  </div>
+  <div class="qr-slot" id="h-qr-slot">
+    <div id="h-qr"></div>
+  </div>
+</header>
+
+<main class="h-main">
+  <section class="h-seats">
+    <div class="h-head">
+      <h2 id="h-phase">Lobby</h2>
+      <p class="h-sub" id="h-sub">Waiting for pilots</p>
+    </div>
+    <ol class="h-list" id="h-list"></ol>
+  </section>
+
+  <aside class="h-side">
+    <div class="h-panel">
+      <p class="field-label">Team</p>
+      <div class="h-teamrow">
+        <input id="h-team-input" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <button class="ghost" id="h-team-join">Join</button>
+      </div>
+      <button class="ghost wide" id="h-team-new">Create a new team</button>
+      <p class="h-note" id="h-team-note">Create a team, then read the code out. Pilots type it on their screen and their phone.</p>
+    </div>
+
+    <div class="h-panel">
+      <p class="field-label">Match</p>
+      <div class="h-rounds">
+        <span>Rounds</span>
+        <div class="segmented" id="h-rounds"></div>
+      </div>
+      <button class="primary" id="h-start" disabled>Start the match</button>
+      <button class="ghost" id="h-abort" hidden>Abort</button>
+      <p class="h-note" id="h-note">At least one seat needs a screen and a phone.</p>
+    </div>
+
+    <div class="h-panel" id="h-scorebox">
+      <p class="field-label">Scoring</p>
+      <ul class="h-rules">
+        <li>1000 points, minus 4 a second</li>
+        <li>−50 a missed ring, −25 a rim hit, −150 a crash</li>
+        <li>+100 for a clean round, up to +60 for the landing</li>
+        <li>Out of time is 0 for that round</li>
+      </ul>
+    </div>
+  </aside>
+</main>
+
+<section class="h-results" id="h-results" hidden>
+  <h2 id="h-res-title">Round result</h2>
+  <table class="ar-table">
+    <thead>
+      <tr id="h-res-head"><th>#</th><th>Pilot</th><th>Time</th><th>Rings</th><th>Miss</th><th>Hits</th><th>Crash</th><th class="num">Points</th></tr>
+    </thead>
+    <tbody id="h-res-rows"></tbody>
+  </table>
+  <p class="ar-foot" id="h-res-foot"></p>
+</section>
+
+<script type="module" src="/js/host.js"></script>
+</body>
+</html>

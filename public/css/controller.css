@@ -1,0 +1,586 @@
+:root {
+  --ink: #070b14;
+  --panel: #101728;
+  --panel-2: #0b1120;
+  --line: #232d44;
+  --paper: #e8ecf7;
+  --dim: #8b97b8;
+  --signal: #ff7a1a;
+  --mint: #2fd39c;
+  --alarm: #ff5a4d;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+
+  --r: 6px;
+  --tap: 44px;
+
+  --display: "DIN Alternate", "Bahnschrift", "Oswald", "Arial Narrow", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--sans);
+  font-size: 16px;
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button { font: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+h1 { font-family: var(--display); font-size: 27px; font-weight: 600; margin: 0; letter-spacing: 0.02em; line-height: 1.2; }
+
+.eyebrow {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 0 0 var(--s2);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+.dot.ok { background: var(--mint); box-shadow: 0 0 0 3px rgba(47, 211, 156, 0.18); }
+
+/* ---------- full-screen sheets: pair, wait, mode picker, task picker ---------- */
+.sheetful {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding:
+    max(var(--s4), env(safe-area-inset-top))
+    max(var(--s4), env(safe-area-inset-right))
+    max(var(--s4), env(safe-area-inset-bottom))
+    max(var(--s4), env(safe-area-inset-left));
+  background: radial-gradient(120% 80% at 50% 0%, #18233f, #05070f);
+  z-index: 20;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  animation: sheet-in 220ms var(--ease);
+}
+.sheetful[hidden] { display: none; }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(10px); } }
+
+.gate-card { width: min(380px, 100%); touch-action: pan-y; }
+.pick-card { width: min(560px, 100%); touch-action: pan-y; }
+
+.lede { color: var(--dim); margin: var(--s2) 0 var(--s5); line-height: 1.55; font-size: 15px; }
+.lede b { color: var(--paper); font-weight: 600; }
+
+#pin-input {
+  width: 100%;
+  min-height: var(--tap);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 40px;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;      /* keeps the tracked digits optically centred */
+  text-align: center;
+  padding: var(--s3) 0;
+}
+#pin-input:focus { border-color: var(--signal); }
+
+.err { color: var(--alarm); font-family: var(--mono); font-size: 12px; min-height: 16px; margin: var(--s2) 0 0; }
+
+/* the pair card swaps its button for a spinner while the socket opens */
+.connecting { display: none; align-items: center; gap: var(--s2); color: var(--dim); font-size: 14px; margin: var(--s4) 0 0; }
+.busy .connecting { display: flex; }
+.busy .primary, .busy #pin-input { display: none; }
+
+.spinner {
+  width: 15px; height: 15px; flex: none;
+  border: 2px solid var(--line);
+  border-top-color: var(--signal);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+.spinner.big { width: 20px; height: 20px; border-width: 3px; display: inline-block; vertical-align: -2px; margin-right: var(--s2); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.primary {
+  width: 100%;
+  min-height: var(--tap);
+  margin-top: var(--s3);
+  background: var(--signal);
+  color: var(--ink);
+  border: 0;
+  border-radius: var(--r);
+  font-family: var(--display);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: var(--s3);
+  transition: transform 120ms var(--ease), filter 120ms var(--ease), background 160ms var(--ease);
+}
+.primary:active { filter: brightness(0.85); transform: scale(0.98); }
+.primary.armed { background: var(--mint); }
+
+/* ---------- the two mode cards ---------- */
+.pick-grid { display: grid; gap: var(--s3); margin-top: var(--s4); }
+
+.pick {
+  display: grid;
+  gap: 5px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--s4) var(--s4) 18px;
+  color: var(--paper);
+  font: inherit;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease), transform 120ms var(--ease);
+}
+.pick:active { border-color: var(--mint); background: rgba(47, 211, 156, 0.1); transform: scale(0.99); }
+.p-tag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--signal); }
+.p-name { font-family: var(--display); font-size: 23px; letter-spacing: 0.02em; }
+.p-sub { color: var(--dim); font-size: 13.5px; line-height: 1.5; }
+
+/* ---------- task picker ---------- */
+.tasks { list-style: none; margin: var(--s4) 0; padding: 0; }
+.tasks li { margin-bottom: var(--s2); }
+.tasks button {
+  width: 100%;
+  min-height: var(--tap);
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--paper);
+  padding: var(--s3) 14px;
+  transition: border-color 140ms var(--ease), transform 120ms var(--ease);
+}
+.tasks button:active { border-color: var(--mint); transform: scale(0.99); }
+.tasks .tn { font-family: var(--display); font-size: 17px; letter-spacing: 0.02em; }
+.tasks .ts { color: var(--dim); font-size: 12.5px; }
+
+/* ---------- transmitter ---------- */
+#tx {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding:
+    max(var(--s2), env(safe-area-inset-top))
+    max(var(--s2), env(safe-area-inset-right))
+    max(var(--s2), env(safe-area-inset-bottom))
+    max(var(--s2), env(safe-area-inset-left));
+  gap: 6px;
+}
+#tx[hidden] { display: none; }
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 5px var(--s2) 5px var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  flex: none;
+}
+.tele { display: flex; align-items: baseline; gap: 4px; }
+.tele .k { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; color: var(--dim); }
+.tele .v { font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums; min-width: 2.4ch; text-align: right; }
+.tele .u { font-family: var(--mono); font-size: 9px; color: var(--dim); }
+.tele.link { margin-left: auto; }
+.tele.link .v { font-size: 13px; min-width: 5ch; }
+.tele.low .v, .tele.low .u { color: var(--alarm); }
+
+.chip {
+  min-height: 38px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--dim);
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 11px;
+  white-space: nowrap;
+  transition: border-color 140ms var(--ease), color 140ms var(--ease);
+}
+.chip:active { border-color: var(--signal); color: var(--signal); }
+
+/* The full-screen toggle. One glyph swaps for the other so the button reads as
+   "expand" on the way in and "collapse" on the way out. */
+.chip.icon { padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; }
+.chip.icon[hidden] { display: none; }
+.chip.icon svg { display: block; }
+.chip.icon .fs-out { display: none; }
+.chip.icon[aria-pressed='true'] { border-color: var(--signal); color: var(--signal); }
+.chip.icon[aria-pressed='true'] .fs-in { display: none; }
+.chip.icon[aria-pressed='true'] .fs-out { display: inline; }
+
+.linkwarn {
+  flex: none;
+  margin: 0;
+  border: 1px solid rgba(255, 90, 77, 0.5);
+  border-radius: 4px;
+  background: rgba(255, 90, 77, 0.12);
+  color: #ffb4ac;
+  font-size: 12px;
+  padding: 6px var(--s2);
+}
+.linkwarn[hidden] { display: none; }
+
+.task { padding: 0 var(--s1); flex: none; }
+.task p {
+  margin: 0 0 5px;
+  font-size: 13.5px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bar { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar span { display: block; height: 100%; width: 0; background: var(--mint); transition: width 200ms var(--ease); }
+
+/* ---------- arena: the round strip ---------- */
+.arena {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--mint);
+  border-radius: 4px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+}
+.arena[hidden] { display: none; }
+.arena i { color: var(--line); font-style: normal; }
+.arena .a-round { color: var(--paper); }
+.arena .a-track {
+  flex: 1; min-width: 0;
+  font-family: var(--display);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: var(--paper);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.arena .a-ring, .arena .a-time { color: var(--paper); font-variant-numeric: tabular-nums; }
+.arena .a-pts { color: var(--mint); font-size: 14px; font-variant-numeric: tabular-nums; }
+.arena.brief { border-left-color: var(--signal); }
+.arena.brief .a-track { color: var(--signal); }
+.arena.low .a-time { color: var(--alarm); }
+
+#seat-list button[aria-current='true'] { border-color: var(--mint); }
+#seat-list button[disabled] { opacity: 0.45; }
+#seat-list .seat-empty { color: var(--dim); font-size: 13px; padding: var(--s3) 0; list-style: none; }
+
+#team-input {
+  width: 100%;
+  min-height: var(--tap);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 34px;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: var(--s3) 0;
+}
+#team-input:focus { border-color: var(--signal); }
+
+#cs-input {
+  width: 100%;
+  min-height: var(--tap);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--paper);
+  font-family: var(--display);
+  font-size: 26px;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: var(--s3);
+}
+#cs-input:focus { border-color: var(--signal); }
+
+/* ---------- the coach: one line folded, full card open ---------- */
+.coach {
+  flex: none;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--mint);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 7px 10px;
+}
+.coach[hidden] { display: none; }
+.coach-head { display: flex; align-items: center; gap: var(--s2); }
+.key-chip {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  background: var(--signal); color: var(--ink);
+  padding: 3px 7px; border-radius: 2px; white-space: nowrap; flex: none;
+}
+.g-count { font-family: var(--mono); font-size: 10px; color: var(--dim); flex: none; margin-left: auto; }
+.g-title {
+  font-family: var(--display); font-size: 15px; margin: 0; letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.caret {
+  flex: none; width: 8px; height: 8px; border-right: 1.5px solid var(--dim); border-bottom: 1.5px solid var(--dim);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 180ms var(--ease);
+}
+.coach.open .caret { transform: rotate(-135deg) translate(-2px, -2px); }
+
+.coach-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ease);
+}
+.coach.open .coach-body { grid-template-rows: 1fr; }
+.coach-body > * { overflow: hidden; }
+.g-body { font-size: 12.5px; line-height: 1.45; color: var(--dim); margin: 6px 0 7px; }
+
+/* ---------- the two sticks ---------- */
+.sticks {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: var(--s2);
+  min-height: 0;
+}
+
+.gimbal {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(38, 52, 84, 0.5), transparent 60%),
+    linear-gradient(180deg, rgba(16, 23, 40, 0.95), rgba(7, 11, 20, 0.95));
+  touch-action: none;
+  overflow: hidden;
+}
+.gimbal canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.axis, .pad-name {
+  position: absolute;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  pointer-events: none;
+}
+.axis.top { top: 5px; left: 50%; transform: translateX(-50%); }
+.axis.bottom { bottom: 15px; left: 50%; transform: translateX(-50%); }
+.axis.left { left: 15px; top: 50%; transform: translateY(-50%); }
+.axis.right { right: 15px; top: 50%; transform: translateY(-50%); }
+.pad-name {
+  top: 5px; right: 6px;
+  font-size: 8px; letter-spacing: 0.18em;
+  color: rgba(139, 151, 184, 0.5);
+}
+#g-right .pad-name { right: auto; left: 6px; }
+
+.deck {
+  width: 130px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s2);
+}
+.deck .row { display: flex; gap: var(--s2); }
+/* Column flex would stretch these to fill the height — the deck is a button
+   cluster, not a bar chart. Only the row's children may share width. */
+.deck > .small, .deck > .primary, .deck > .row { flex: none; }
+.deck .primary { margin-top: 0; font-size: 16px; }
+.small {
+  flex: 1;
+  min-height: var(--tap);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--paper);
+  font-family: var(--display);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: var(--s2) var(--s1);
+  transition: background 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease), transform 120ms var(--ease);
+}
+.small:active { background: var(--line); transform: scale(0.97); }
+.small[hidden] { display: none; }
+.small[aria-pressed="true"] { border-color: var(--mint); color: var(--mint); background: rgba(47, 211, 156, 0.1); }
+.small.wide { width: 100%; padding: var(--s3); }
+.small.ghosted { background: none; color: var(--dim); margin-top: var(--s2); }
+
+.hint {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--dim);
+  border-left: 2px solid var(--signal);
+  padding-left: var(--s2);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hint:empty { display: none; }
+
+/* ---------- immersive: the transmitter, and nothing else ----------
+   Everything that is not a stick or a button gives its pixels back. On a phone
+   with the Fullscreen API this rides along with the browser chrome going away;
+   on iOS it is the whole of the effect. */
+body.immersive #tx {
+  gap: 3px;
+  padding:
+    0
+    max(0px, env(safe-area-inset-right))
+    max(0px, env(safe-area-inset-bottom))
+    max(0px, env(safe-area-inset-left));
+}
+body.immersive .strip {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  padding: 2px var(--s2);
+  gap: var(--s2);
+}
+body.immersive .strip .tele .v { font-size: 14px; }
+body.immersive .chip { min-height: 32px; font-size: 11px; padding: 0 8px; }
+/* The objective keeps its bar but drops to one line; the long-form hint goes. */
+body.immersive .task { padding: 0 var(--s2); }
+body.immersive .task p { -webkit-line-clamp: 1; margin-bottom: 3px; }
+body.immersive .hint { display: none; }
+body.immersive .gimbal { border-radius: 6px; }
+
+#fstip {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: min(420px, 88vw);
+  margin: 0;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--signal);
+  border-radius: 4px;
+  background: rgba(7, 11, 20, 0.94);
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 12px;
+  text-align: center;
+}
+#fstip b { color: var(--paper); font-weight: 600; }
+#fstip[hidden] { display: none; }
+
+/* ---------- upright phone: the sticks want to be held sideways ---------- */
+#rotate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  place-content: center;
+  justify-items: center;
+  gap: var(--s3);
+  text-align: center;
+  padding: var(--s5);
+  background: var(--ink);
+  color: var(--paper);
+}
+#rotate p { font-family: var(--display); font-size: 21px; margin: 0; letter-spacing: 0.02em; }
+#rotate span { color: var(--dim); font-size: 13.5px; }
+#rotate svg { color: var(--signal); animation: tip 2.4s var(--ease) infinite; }
+@keyframes tip {
+  0%, 55%, 100% { transform: rotate(0deg); }
+  70%, 90% { transform: rotate(-90deg); }
+}
+
+#rotate .small { max-width: 240px; margin-top: var(--s2); }
+
+/* Only nag while the sticks are the active screen — the sheets read fine
+   upright — and never again once the pilot says they are happy as they are. */
+@media (orientation: portrait) {
+  body:not(.upright-ok) #tx:not([hidden]) ~ #rotate { display: grid; }
+
+  /* Portrait still flies. The deck moves to a strip above two half-width pads
+     so both thumbs keep a full-height stick under them. */
+  /* Pads live at the bottom edge where the thumbs already are, capped so a
+     tall phone does not stretch them into useless letterboxes. */
+  .sticks {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto minmax(0, 46vh);
+    align-content: end;
+  }
+  .deck {
+    grid-area: 1 / 1 / 2 / 3;
+    width: auto;
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .deck > .small, .deck > .primary, .deck > .row { flex: 1; }
+  .deck > .row { flex: 2; }
+  .deck .primary { font-size: 14px; padding: var(--s2); }
+  #g-left { grid-area: 2 / 1; }
+  #g-right { grid-area: 2 / 2; }
+
+  /* A narrow strip has no room for the pad captions or a single-line header. */
+  .pad-name { display: none; }
+  .strip { flex-wrap: wrap; row-gap: 6px; }
+  .tele.link { margin-left: auto; }
+}
+
+/* A short landscape phone: trade text for stick area. */
+@media (orientation: landscape) and (max-height: 460px) {
+  #tx { gap: var(--s1); }
+  .task p { -webkit-line-clamp: 1; margin-bottom: 4px; }
+  .hint { -webkit-line-clamp: 1; }
+  .deck { width: 116px; }
+  .deck .primary { font-size: 15px; padding: var(--s2); }
+  .small { font-size: 12px; }
+  .strip { padding: 3px var(--s2); gap: var(--s2); }
+  .tele .v { font-size: 15px; }
+  h1 { font-size: 22px; }
+  .sheetful { align-content: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

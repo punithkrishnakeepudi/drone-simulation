@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#070b14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Drone Trainer — Controller</title>
+<link rel="stylesheet" href="/css/controller.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23070b14'/%3E%3Cpath d='M16 6 L22 24 L16 20 L10 24 Z' fill='%23ff7a1a'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- 1. pair -->
+<div id="gate" class="sheetful">
+  <div class="gate-card scrolls" id="gate-card">
+    <p class="eyebrow">Transmitter</p>
+    <h1>Enter the pairing code</h1>
+    <p class="lede">It is on the simulator screen on your computer.</p>
+    <label class="sr-only" for="pin-input">Four digit pairing code</label>
+    <input id="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off" />
+    <button id="pin-go" class="primary">Connect</button>
+    <p class="connecting">
+      <span class="spinner" aria-hidden="true"></span> Connecting…
+    </p>
+    <p class="err" id="gate-err" role="alert"></p>
+  </div>
+</div>
+
+<!-- 2. paired, but the simulator has not shown up yet -->
+<div id="wait" class="sheetful" hidden>
+  <div class="gate-card">
+    <p class="eyebrow">Paired</p>
+    <h1><span class="spinner big" aria-hidden="true"></span> Waiting for the simulator</h1>
+    <p class="lede">Open <b>http://&lt;this address&gt;</b> on the computer running the server. This screen moves on by itself the moment it appears.</p>
+    <button class="small wide" id="wait-repair">Use a different pairing code</button>
+  </div>
+</div>
+
+<!-- 2b. who is flying — required before a seat can be taken -->
+<div id="name" class="sheetful" hidden>
+  <div class="gate-card scrolls">
+    <p class="eyebrow">Arena</p>
+    <h1>What should we call you?</h1>
+    <p class="lede">This is the name on the leaderboard. Two to twelve characters.</p>
+    <label class="sr-only" for="cs-input">Callsign</label>
+    <input id="cs-input" maxlength="12" placeholder="CALLSIGN" autocomplete="off" autocapitalize="characters" />
+    <button id="cs-go" class="primary">Continue</button>
+    <p class="err" id="cs-err" role="alert"></p>
+  </div>
+</div>
+
+<!-- 2c. which team -->
+<div id="team" class="sheetful" hidden>
+  <div class="gate-card scrolls">
+    <p class="eyebrow">Arena · <span id="team-who">Pilot</span></p>
+    <h1>Team code</h1>
+    <p class="lede">Four characters, from whoever started the team. It is on their screen.</p>
+    <label class="sr-only" for="team-input">Team code</label>
+    <input id="team-input" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+    <button id="team-go" class="primary">Join team</button>
+    <p class="err" id="team-err" role="alert"></p>
+    <button class="small wide ghosted" id="team-make">Nobody has made one — create a team</button>
+    <button class="small wide ghosted" id="team-rename">Change callsign</button>
+  </div>
+</div>
+
+<!-- 2d. which of the five seats -->
+<div id="seats" class="sheetful" hidden>
+  <div class="pick-card scrolls">
+    <p class="eyebrow"><span class="dot ok" aria-hidden="true"></span> <span id="seat-who">Pilot</span> · team <span id="seat-team">----</span></p>
+    <h1>Take a seat</h1>
+    <p class="lede">Each seat is one screen. Pick the one in front of you.</p>
+    <ul class="tasks" id="seat-list"></ul>
+    <p class="err" id="seat-err" role="alert"></p>
+    <button class="small wide ghosted" id="seat-team-back">Different team</button>
+  </div>
+</div>
+
+<!-- 3. pick a mode -->
+<div id="pick" class="sheetful" hidden>
+  <div class="pick-card scrolls">
+    <p class="eyebrow"><span class="dot ok" aria-hidden="true"></span> Connected · choose one</p>
+    <h1>How do you want to fly?</h1>
+    <div class="pick-grid">
+      <button class="pick" data-session="free">
+        <span class="p-tag">Mode 1</span>
+        <span class="p-name">Free flight</span>
+        <span class="p-sub">No course, no hints, no scoring. Full real-drone physics with raw throttle and wind.</span>
+      </button>
+      <button class="pick" data-session="task">
+        <span class="p-tag">Mode 2</span>
+        <span class="p-name">Task mode</span>
+        <span class="p-sub">Five tyre courses. Task 1 walks you through every control; 2–5 just run.</span>
+      </button>
+      <button class="pick" data-session="arena">
+        <span class="p-tag">Mode 3</span>
+        <span class="p-name">Arena</span>
+        <span class="p-sub">Team of five. A different track every round, scored on time and mistakes. Nobody can see or block anybody.</span>
+      </button>
+    </div>
+    <button class="small wide ghosted" id="pick-back">Cancel</button>
+  </div>
+</div>
+
+<!-- 4. transmitter -->
+<main id="tx" hidden>
+  <header class="strip">
+    <div class="tele"><span class="k">ALT</span><span class="v" id="t-alt">0.0</span><span class="u">m</span></div>
+    <div class="tele"><span class="k">SPD</span><span class="v" id="t-spd">0.0</span><span class="u">m/s</span></div>
+    <div class="tele" id="tele-batt"><span class="k">BATT</span><span class="v" id="t-batt">100</span><span class="u">%</span></div>
+    <div class="tele link"><span class="k">LINK</span><span class="v" id="t-link">–</span></div>
+    <button id="b-session" class="chip">Free</button>
+    <button id="b-mode" class="chip">Realistic</button>
+    <button id="b-full" class="chip icon" aria-label="Full screen" aria-pressed="false" hidden>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path class="fs-in" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+        <path class="fs-out" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+      </svg>
+    </button>
+  </header>
+
+  <p id="linkwarn" class="linkwarn" role="status" hidden></p>
+
+  <!-- Arena only: the round and the clock, mirrored from the screen -->
+  <section class="arena" id="tx-arena" hidden>
+    <span class="a-round">R<span id="a-round">1</span><i>/</i><span id="a-of">3</span></span>
+    <span class="a-track" id="a-track">—</span>
+    <span class="a-ring"><span id="a-ring">0</span><i>/</i><span id="a-rings">0</span></span>
+    <span class="a-time" id="a-time">0.0</span>
+    <span class="a-pts" id="a-pts">1000</span>
+  </section>
+
+  <section class="task">
+    <p id="t-obj">Waiting for the simulator…</p>
+    <div class="bar"><span id="t-bar"></span></div>
+  </section>
+
+  <!-- the coach, mirrored from the simulator; folds down to one line -->
+  <section class="coach" id="t-guide" hidden>
+    <div class="coach-head">
+      <span class="key-chip" id="g-key">MOTORS</span>
+      <p class="g-title" id="g-title"></p>
+      <span class="g-count" id="g-count">1 / 11</span>
+      <span class="caret" aria-hidden="true"></span>
+    </div>
+    <div class="coach-body">
+      <p class="g-body" id="g-body"></p>
+      <div class="bar"><span id="g-bar"></span></div>
+    </div>
+  </section>
+
+  <div class="sticks">
+    <div class="gimbal" id="g-left">
+      <canvas></canvas>
+      <p class="axis top">UP</p>
+      <p class="axis bottom">DOWN</p>
+      <p class="axis left">TURN L</p>
+      <p class="axis right">TURN R</p>
+      <p class="pad-name">THROTTLE / YAW</p>
+    </div>
+
+    <div class="deck">
+      <button id="b-fly" class="primary">Take off</button>
+      <button id="b-motors" class="small" aria-pressed="false">Motors</button>
+      <div class="row">
+        <button id="b-view" class="small">View</button>
+        <button id="b-reset" class="small">Reset</button>
+      </div>
+      <button id="b-tasks" class="small" hidden>Tasks</button>
+    </div>
+
+    <div class="gimbal" id="g-right">
+      <canvas></canvas>
+      <p class="axis top">FWD</p>
+      <p class="axis bottom">BACK</p>
+      <p class="axis left">LEFT</p>
+      <p class="axis right">RIGHT</p>
+      <p class="pad-name">PITCH / ROLL</p>
+    </div>
+  </div>
+
+  <footer class="hint" id="t-hint"></footer>
+
+  <!-- iOS Safari has no Fullscreen API outside <video>; this is the way out. -->
+  <p id="fstip" role="status" hidden>Share → <b>Add to Home Screen</b>, then open it from there for a true full screen with no address bar.</p>
+</main>
+
+<!-- 5. task picker -->
+<div id="tasksheet" class="sheetful" hidden>
+  <div class="pick-card scrolls">
+    <p class="eyebrow">Task mode</p>
+    <h1>Pick a course</h1>
+    <ul class="tasks" id="t-list"></ul>
+    <button class="small wide" id="tasks-back">Back to the sticks</button>
+  </div>
+</div>
+
+<!-- a nudge, not a wall: the sticks are far better in landscape, but the
+     portrait layout below works if the pilot would rather stay upright -->
+<div id="rotate">
+  <svg class="rot-icon" viewBox="0 0 64 64" width="76" height="76" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="23" y="12" width="18" height="34" rx="3.5" />
+    <line x1="29" y1="17" x2="35" y2="17" />
+    <path d="M14 52a22 22 0 0 0 36 0" stroke-dasharray="3 4" opacity="0.55" />
+    <path d="M14 52l5-4M14 52l1 6" opacity="0.55" />
+  </svg>
+  <p>Turn the phone sideways</p>
+  <span>A transmitter is held in landscape — the sticks get roughly three times the travel.</span>
+  <button class="small" id="rotate-stay">Fly upright anyway</button>
+</div>
+
+<script type="module" src="/js/controller.js"></script>
+</body>
+</html>

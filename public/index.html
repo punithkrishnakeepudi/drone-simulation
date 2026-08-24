@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Drone Trainer — Simulator</title>
+<link rel="stylesheet" href="/css/sim.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23070b14'/%3E%3Cpath d='M16 6 L22 24 L16 20 L10 24 Z' fill='%23ff7a1a'/%3E%3C/svg%3E" />
+<script type="importmap">
+{ "imports": { "three": "/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<!-- Step 1 — pairing -->
+<div id="pair" class="overlay">
+  <div class="card wide">
+    <p class="eyebrow">Step 1 of 2</p>
+    <h1>Connect your phone</h1>
+    <p class="lede">Your phone is the transmitter. Keep both devices on the same Wi-Fi or laptop hotspot.</p>
+
+    <div class="pair-grid">
+      <div>
+        <p class="field-label">Open on your phone</p>
+        <p class="url" id="pair-url">…</p>
+        <p class="field-label">Pairing code</p>
+        <p class="pin" id="pair-pin">····</p>
+        <p class="pair-status" id="pair-status" role="status">Waiting for phone…</p>
+        <p class="foot">No phone right now? <button class="linkish" id="pair-skip">Fly with the keyboard</button></p>
+      </div>
+      <div class="qr-slot">
+        <div id="qr"></div>
+        <p class="field-label center">or scan</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Step 2 — pick how you want to fly -->
+<div id="modes" class="overlay" hidden>
+  <div class="card wide">
+    <p class="eyebrow">Step 2 of 2</p>
+    <h1>How do you want to fly?</h1>
+    <p class="lede">You can switch at any time from the phone or with the M key.</p>
+
+    <div class="mode-cards">
+      <button class="mode-card" data-session="free">
+        <span class="mc-tag">Mode 1</span>
+        <span class="mc-name">Free flight</span>
+        <span class="mc-sub">Nothing is explained. Nothing is scored.</span>
+        <ul class="mc-list">
+          <li>Open field, no course, no objectives</li>
+          <li>Cruise flight model: altitude hold, so the throttle springs back to centre and the drone keeps the height you left it at</li>
+          <li>Full physics otherwise: real momentum, gusting wind, battery sag</li>
+          <li>Switch to Realistic (raw throttle) or Acro from the phone at any time</li>
+        </ul>
+        <span class="mc-go">Just fly →</span>
+      </button>
+
+      <button class="mode-card" data-session="task">
+        <span class="mc-tag">Mode 2</span>
+        <span class="mc-name">Task mode</span>
+        <span class="mc-sub">Five tyre courses, five patterns.</span>
+        <ul class="mc-list">
+          <li>Task 1 walks you through every control, step by step</li>
+          <li>Tasks 2–5 run straight through with no coaching</li>
+          <li>Fly through the tyres in order, then land on the pad</li>
+          <li>Timed, with missed tyres and rim hits counted</li>
+        </ul>
+        <span class="mc-go">Start task 1 →</span>
+      </button>
+
+      <button class="mode-card" data-session="arena">
+        <span class="mc-tag">Mode 3</span>
+        <span class="mc-name">Arena</span>
+        <span class="mc-sub">Up to five pilots, one team, a different track every round.</span>
+        <ul class="mc-list">
+          <li>Junkyard, city, warehouse, forest and harbour — twelve courses</li>
+          <li>Everyone flies the same track at the same time, in their own copy of it</li>
+          <li>You never see another pilot and nobody can get in your way</li>
+          <li>Points for the round: time, missed rings, hits, crashes, landing</li>
+        </ul>
+        <span class="mc-go">Take a seat →</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Arena: seat, briefing, round results and the final table all live here -->
+<div id="arena-sheet" class="overlay" hidden>
+  <div class="card wide arena-card">
+    <p class="eyebrow" id="ar-eyebrow">Arena</p>
+    <h1 id="ar-title">Waiting for the host</h1>
+    <p class="lede" id="ar-lede"></p>
+
+    <!-- the team gate: make one and read the code out, or type someone else's -->
+    <div class="ar-team" id="ar-team" hidden>
+      <div class="ar-team-make">
+        <p class="field-label">Starting the team?</p>
+        <button class="ghost big" id="ar-create">Create a team</button>
+        <p class="ar-hint">You get a four-character code. Read it out; everyone else types it in.</p>
+      </div>
+      <div class="ar-team-join">
+        <p class="field-label">Joining one</p>
+        <input id="ar-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <button class="ghost big" id="ar-join">Join team</button>
+        <p class="err" id="ar-err" role="alert"></p>
+      </div>
+    </div>
+
+    <!-- once in, the code stays big enough to read from across the room -->
+    <div class="ar-code-strip" id="ar-code-strip" hidden>
+      <span class="field-label">Team code</span>
+      <span class="ar-code-big" id="ar-code-big">----</span>
+      <button class="linkish" id="ar-leave">Leave this team</button>
+    </div>
+
+    <div class="ar-countdown" id="ar-count" hidden><span id="ar-count-n">10</span></div>
+
+    <table class="ar-table" id="ar-table" hidden>
+      <thead>
+        <tr id="ar-head"><th>#</th><th>Pilot</th><th>Time</th><th>Rings</th><th>Miss</th><th>Hits</th><th>Crash</th><th class="num">Points</th></tr>
+      </thead>
+      <tbody id="ar-rows"></tbody>
+    </table>
+
+    <p class="ar-foot" id="ar-foot"></p>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" hidden>
+  <!-- Arena only: the round, the clock and where you are in the field -->
+  <section class="panel arena-bar" id="arena-bar" hidden>
+    <div class="ab-block">
+      <span class="ab-k">ROUND</span>
+      <span class="ab-v"><span id="ab-round">1</span><i>/</i><span id="ab-of">3</span></span>
+    </div>
+    <div class="ab-block wide">
+      <span class="ab-k">TRACK</span>
+      <span class="ab-v small" id="ab-track">—</span>
+    </div>
+    <div class="ab-block">
+      <span class="ab-k">RING</span>
+      <span class="ab-v"><span id="ab-ring">0</span><i>/</i><span id="ab-rings">0</span></span>
+    </div>
+    <div class="ab-block">
+      <span class="ab-k">TIME</span>
+      <span class="ab-v" id="ab-time">0.0</span>
+    </div>
+    <div class="ab-block">
+      <span class="ab-k">LEFT</span>
+      <span class="ab-v" id="ab-left">3:00</span>
+    </div>
+    <div class="ab-block">
+      <span class="ab-k">PTS</span>
+      <span class="ab-v mint" id="ab-pts">1000</span>
+    </div>
+    <ol class="ab-board" id="ab-board"></ol>
+  </section>
+
+  <section class="panel task-card" id="task-card">
+    <p class="eyebrow" id="task-eyebrow">Free flight</p>
+    <h2 id="task-name">Free flight</h2>
+    <div class="objective">
+      <p id="obj-label">Open field</p>
+      <div class="bar"><span id="obj-bar"></span></div>
+      <p class="detail" id="obj-detail"></p>
+    </div>
+    <p class="hint" id="obj-hint"></p>
+    <div class="card-row">
+      <button id="btn-tasks" class="ghost">Tasks ▸</button>
+      <button id="btn-session" class="ghost">Switch mode</button>
+    </div>
+  </section>
+
+  <section class="panel status" id="status-card">
+    <div class="chip" id="chip-link"><i></i><span>Waiting</span></div>
+    <div class="chip" id="chip-session"><i></i><span>Free</span></div>
+    <div class="chip" id="chip-mode"><i></i><span>Realistic</span></div>
+    <div class="chip" id="chip-cam"><i></i><span>Pilot view</span></div>
+    <button class="chip act" id="btn-dcam" aria-pressed="true" title="Drone camera (V)"><i></i><span>Drone cam</span></button>
+    <button class="chip act" id="btn-full" aria-pressed="false" title="Full screen (F)"><i></i><span>Full screen</span></button>
+  </section>
+
+  <!-- The camera bolted to the drone. The picture itself is rendered straight
+       onto the WebGL canvas underneath this frame, so the box is deliberately
+       transparent — it is a bezel, not a screen. -->
+  <section class="dronecam" id="dcam-wrap">
+    <div class="dc-view" id="dcam"></div>
+    <div class="dc-bar">
+      <span class="dc-dot" aria-hidden="true"></span>
+      <span class="dc-label">DRONE CAM</span>
+      <span class="dc-alt"><span id="dc-alt">0.0</span> m</span>
+    </div>
+  </section>
+
+  <canvas id="alt-tape" class="tape"></canvas>
+  <p class="tape-label">ALT&nbsp;m</p>
+
+  <section class="readouts">
+    <div><span class="k">SPD</span><span class="v" id="ro-spd">0.0</span><span class="u">m/s</span></div>
+    <div><span class="k">HDG</span><span class="v" id="ro-hdg">000</span><span class="u">°</span></div>
+    <div><span class="k">DIST</span><span class="v" id="ro-dist">0.0</span><span class="u">m</span></div>
+    <div><span class="k">WIND</span><span class="v" id="ro-wind">0.0</span><span class="u">m/s</span></div>
+    <div class="batt"><span class="k">BATT</span><span class="v" id="ro-batt">100</span><span class="u">%</span>
+      <div class="bar slim"><span id="batt-bar"></span></div>
+    </div>
+  </section>
+
+  <!-- the coach: only ever visible during task 1 -->
+  <section class="panel guide" id="guide-card" hidden>
+    <div class="guide-head">
+      <p class="eyebrow">Guided · step <span id="guide-n">1</span> of <span id="guide-total">11</span></p>
+      <span class="key-chip" id="guide-key">MOTORS</span>
+    </div>
+    <h3 id="guide-title">Start the motors</h3>
+    <p id="guide-body">…</p>
+    <div class="bar"><span id="guide-bar"></span></div>
+    <div class="dots" id="guide-dots"></div>
+    <button class="linkish" id="guide-skip">Skip the walk-through</button>
+  </section>
+
+  <section class="radar-wrap">
+    <canvas id="radar"></canvas>
+    <p class="radar-note" id="nose-warn" hidden>Nose is pointing at you — left and right are mirrored</p>
+  </section>
+
+  <!-- the small black box: plan view of the path actually flown -->
+  <section class="pathbox-wrap">
+    <canvas id="pathbox"></canvas>
+  </section>
+
+  <canvas id="stick-l" class="stick"></canvas>
+  <canvas id="stick-r" class="stick"></canvas>
+
+  <p id="toast" class="toast" hidden></p>
+</div>
+
+<!-- Task picker -->
+<div id="tasks" class="overlay" hidden>
+  <div class="card wide">
+    <p class="eyebrow">Task mode</p>
+    <h2>Five tyre courses</h2>
+    <ul id="task-list"></ul>
+    <div class="sheet-row">
+      <div>
+        <p class="field-label">Flight model</p>
+        <div class="segmented" id="mode-picker"></div>
+        <p class="mode-blurb" id="mode-blurb"></p>
+      </div>
+      <div>
+        <p class="field-label">Options</p>
+        <label class="check"><input type="checkbox" id="opt-aids" checked /> Ground marker and drop line</label>
+        <label class="check"><input type="checkbox" id="opt-trail" checked /> Flight trail in the world</label>
+        <p class="field-label">Keyboard (no phone)</p>
+        <p class="keys">
+          <b>W/S</b> throttle · <b>A/D</b> yaw · <b>arrows</b> pitch &amp; roll<br />
+          <b>T</b> take off · <b>L</b> land · <b>C</b> camera · <b>R</b> reset · <b>M</b> switch mode<br />
+          <b>F</b> full screen · <b>V</b> drone camera
+        </p>
+      </div>
+    </div>
+    <button class="ghost" id="tasks-close">Close</button>
+  </div>
+</div>
+
+<script type="module" src="/js/sim.js"></script>
+</body>
+</html>
