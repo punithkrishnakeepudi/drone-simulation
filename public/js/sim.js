@@ -1268,12 +1268,11 @@ async function loadSession() {
     if (!res.ok) throw new Error('not local');
     const s = await res.json();
     $('pair-pin').textContent = s.pin;
-    $('pair-url').textContent = s.urls[0] ? s.urls[0].split('?')[0] : `http://<your-ip>:${s.port}/controller.html`;
-    if (s.urls[0]) {
-      const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(s.urls[0])}`);
-      if (svg.ok) $('qr').innerHTML = await svg.text();
-      else $('qr').remove();
-    }
+    const controllerUrl = `${window.location.origin}/controller.html?pin=${s.pin}`;
+    $('pair-url').textContent = `${window.location.origin}/controller.html`;
+    const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(controllerUrl)}`);
+    if (svg.ok) $('qr').innerHTML = await svg.text();
+    else $('qr').remove();
   } catch {
     $('pair-url').textContent = 'Open this page on the computer running the server';
     $('pair-pin').textContent = '––––';

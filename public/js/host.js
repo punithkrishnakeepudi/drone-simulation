@@ -298,12 +298,10 @@ async function boot() {
     if (!res.ok) throw new Error('not local');
     const s = await res.json();
     $('h-code').textContent = s.pin;
-    const join = s.urls[0] ? s.urls[0].split('?')[0] : '';
-    $('h-url').textContent = join || `http://<your-ip>:${s.port}/controller.html`;
-    if (s.urls[0]) {
-      const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(s.urls[0])}`);
-      if (svg.ok) $('h-qr').innerHTML = await svg.text();
-    }
+    const controllerUrl = `${window.location.origin}/controller.html?pin=${s.pin}`;
+    $('h-url').textContent = `${window.location.origin}/controller.html`;
+    const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(controllerUrl)}`);
+    if (svg.ok) $('h-qr').innerHTML = await svg.text();
     connect(s.pin);
     return;
   } catch {
