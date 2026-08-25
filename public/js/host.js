@@ -292,15 +292,22 @@ async function boot() {
   buildRoundPicker();
   render();
 
-  // Opened on the machine running the server: it can read the code itself.
+  const api = typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '';
+  const bootParams = new URLSearchParams(location.search);
+
+  // Opened on the machine running the server, or carrying the session token: it
+  // can read the code itself. `keep` matters here — the scoreboard is watching
+  // a session, not starting one, and rolling the code would strand the pilots.
   try {
-    const res = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + '/api/session');
+    const token = bootParams.get('token') || '';
+    const q = `?keep${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+    const res = await fetch(`${api}/api/session${q}`);
     if (!res.ok) throw new Error('not local');
     const s = await res.json();
     $('h-code').textContent = s.pin;
     const controllerUrl = `${window.location.origin}/controller.html?pin=${s.pin}`;
     $('h-url').textContent = `${window.location.origin}/controller.html`;
-    const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(controllerUrl)}`);
+    const svg = await fetch(`${api}/api/qr.svg?url=${encodeURIComponent(controllerUrl)}`);
     if (svg.ok) $('h-qr').innerHTML = await svg.text();
     connect(s.pin);
     return;
@@ -308,7 +315,7 @@ async function boot() {
     /* opened from another device — ask for the code */
   }
 
-  const params = new URLSearchParams(location.search);
+  const params = bootParams;
   const saved = (() => { try { return localStorage.getItem('dt-pin') || ''; } catch { return ''; } })();
   const pin = params.get('pin') || saved;
   $('h-url').textContent = `${location.origin}/controller.html`;

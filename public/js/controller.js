@@ -112,7 +112,7 @@ class Gimbal {
     this.gy = e.clientY;
     this.bx = this.x;
     this.by = this.y;
-    navigator.vibrate?.(8);
+    tick(8);
     e.preventDefault();
   }
 
@@ -291,7 +291,9 @@ let lastPulse = 0;
 let savedPinWritten = '';
 let choseAt = -1e9;   // when this phone last picked a mode, for the grace window
 
-const state = { air: false, crash: false, armed: false, session: null, started: false, modeIndex: 0, sim: 0, anySim: 0 };
+const state = { air: false, crash: false, armed: false, session: null, started: false, modeIndex: 0, sim: 0, anySim: 0, thr: 0 };
+/** Last event counter seen from the simulator; null until the first packet. */
+let lastEventSeq = null;
 /** True while the pilot deliberately opened the picker mid-flight. */
 let pickManual = false;
 
@@ -481,6 +483,14 @@ function onPacket(m) {
   // has to stay where the thumb left it — with the hover point marked.
   left.setSticky(!m.altHold, m.hoverStick ?? 0);
 
+  // Flips are refused below half battery or too near the ground, so the pad
+  // dims to match rather than letting the pilot press into a rejection.
+  const canFlip = m.air && !m.crash && m.batt >= 50 && m.alt >= 1.5;
+  $('flips').classList.toggle('off', !canFlip);
+  $('flip-mid').textContent = m.batt < 50 ? 'BATT' : m.alt < 1.5 ? 'LOW' : 'FLIP';
+  $('b-rth').setAttribute('aria-pressed', String(m.rth === true));
+  $('b-rth').disabled = !m.air;
+
   const fly = $('b-fly');
   fly.textContent = m.crash ? 'Reset' : m.air ? 'Land' : 'Take off';
   fly.classList.toggle('armed', m.air);
@@ -492,8 +502,17 @@ function onPacket(m) {
 
   if (m.pulse !== lastPulse) {
     lastPulse = m.pulse;
-    navigator.vibrate?.(30);
     openCoach();
+  }
+
+  // Haptics run off the named event rather than the pulse counter, so a crash
+  // feels nothing like a tyre. The first packet only primes the cursor —
+  // otherwise reconnecting would replay whatever happened before we arrived.
+  state.thr = m.thr ?? 0;
+  if (lastEventSeq === null) lastEventSeq = m.evn ?? 0;
+  else if (m.evn !== lastEventSeq) {
+    lastEventSeq = m.evn;
+    haptic(m.ev);
   }
 }
 
@@ -548,7 +567,7 @@ function renderSeats() {
     if (mine) b.setAttribute('aria-current', 'true');
     b.onclick = () => {
       link?.send({ t: 'seat/claim', seat: s.id, callsign: arena.callsign });
-      navigator.vibrate?.(12);
+      tick(12);
     };
     li.appendChild(b);
     ul.appendChild(li);
@@ -582,7 +601,7 @@ $('team-go').onclick = () => {
   }
   $('team-err').textContent = '';
   link?.send({ t: 'team/join', code, callsign: arena.callsign });
-  navigator.vibrate?.(12);
+  tick(12);
 };
 $('team-input').addEventListener('input', () => {
   $('team-input').value = $('team-input').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
@@ -627,7 +646,7 @@ requestAnimationFrame(loop);
 
 function cmd(name, value) {
   link?.send({ t: 'cmd', name, value });
-  navigator.vibrate?.(12);
+  tick(12);
 }
 
 $('b-fly').onclick = () => {
@@ -636,6 +655,10 @@ $('b-fly').onclick = () => {
   else cmd('takeoff');
 };
 $('b-motors').onclick = () => cmd('arm', !state.armed);
+$('b-rth').onclick = () => cmd('rth');
+for (const b of document.querySelectorAll('.flip')) {
+  b.onclick = () => cmd('flip', b.dataset.flip);
+}
 $('b-view').onclick = () => cmd('camera');
 $('b-reset').onclick = () => cmd('reset');
 $('b-mode').onclick = () => {
@@ -742,6 +765,117 @@ $('wait-repair').onclick = () => {
   $('gate-err').textContent = '';
   show('gate');
 };
+
+/* ---------------- haptics ---------------- */
+
+/**
+ * A transmitter talks back through your thumbs, and that is most of why a real
+ * one feels solid. `navigator.vibrate` is the only haptic the web gives us, so
+ * this is built out of what it can actually do:
+ *
+ *   - patterns for events, which it does well
+ *   - a rumble under the motors, faked with a short pulse on a repeating timer
+ *     whose length rides the throttle
+ *
+ * Two things to know. Calling vibrate() cancels whatever is already running, so
+ * the rumble and the event patterns have to take turns — `quietUntil` is that
+ * referee. And iOS Safari has no vibrate at all, so on an iPhone the whole
+ * feature hides itself rather than pretending.
+ */
+const canVibrate = typeof navigator.vibrate === 'function';
+
+/* Milliseconds, [buzz, pause, buzz, ...]. Kept short: long patterns block the
+   rumble and start to feel like a phone call rather than an airframe. */
+const HAPTICS = {
+  tyre:            [16],
+  miss:            [40, 60, 40],
+  'guide-step':    [10, 50, 10],
+  'guide-done':    [24, 60, 24],
+  'course-done':   [28, 60, 28, 60, 55],
+  'task-complete': [40, 70, 40, 70, 90],
+  armed:           [10, 45, 10],
+  disarmed:        [22],
+  hover:           [14],
+  landed:          [26],
+  'hard-landing':  [55, 45, 55],
+  bump:            [16],
+  fence:           [10, 45, 10, 45, 10],
+  ceiling:         [10, 45, 10],
+  crash:           [150, 60, 90],
+  'battery-empty': [60, 90, 60],
+  // the new ones
+  flip:            [12, 40, 30],
+  'flip-done':     [22],
+  'flip-refused':  [70, 60, 70],
+  rth:             [18, 60, 18, 60, 18],
+  'rth-cancel':    [30],
+};
+
+let hapticsOn = (() => {
+  try { return localStorage.getItem('dt-haptics') !== 'off'; } catch { return true; }
+})();
+let quietUntil = 0;
+
+const hapticBtn = $('b-haptic');
+hapticBtn.hidden = !canVibrate;
+
+function renderHapticChip() {
+  hapticBtn.setAttribute('aria-pressed', String(hapticsOn && canVibrate));
+}
+
+function setHaptics(on) {
+  hapticsOn = on;
+  try { localStorage.setItem('dt-haptics', on ? 'on' : 'off'); } catch { /* private mode */ }
+  if (!on && canVibrate) navigator.vibrate(0);   // stop anything mid-buzz
+  renderHapticChip();
+}
+
+hapticBtn.onclick = () => setHaptics(!hapticsOn);
+renderHapticChip();
+
+/** A single short tick — button presses, stick detents. */
+function tick(ms) {
+  if (!hapticsOn || !canVibrate) return;
+  const now = performance.now();
+  if (now < quietUntil) return;
+  navigator.vibrate(ms);
+  quietUntil = now + ms + 20;
+}
+
+/** A named pattern. Holds the rumble off for as long as it runs. */
+function haptic(name) {
+  if (!hapticsOn || !canVibrate) return;
+  const pat = HAPTICS[name];
+  if (!pat) return;
+  navigator.vibrate(pat);
+  quietUntil = performance.now() + pat.reduce((a, b) => a + b, 0) + 50;
+}
+
+/**
+ * The rumble. A quad in your hands is a vibration you feel through the frame,
+ * and its intensity is throttle. vibrate() has no amplitude control, so this
+ * approximates it with pulse length: a longer buzz inside the same window
+ * reads as a stronger one.
+ */
+/* The rumble is the battery-hungry half, so it rides the same switch but can be
+   left off on its own with a long press on the chip. */
+let rumbleOn = true;
+
+const RUMBLE_MS = 150;
+setInterval(() => {
+  if (!hapticsOn || !canVibrate || !rumbleOn) return;
+  if (!state.armed || !state.started) return;
+  if (performance.now() < quietUntil) return;
+  const on = Math.round(4 + 22 * Math.pow(state.thr, 1.4));
+  if (on < 5) return;                     // below the threshold you can feel
+  navigator.vibrate(on);
+}, RUMBLE_MS);
+
+hapticBtn.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  rumbleOn = !rumbleOn;
+  tick(rumbleOn ? 30 : 10);
+});
 
 /* ---------------- full screen ---------------- */
 

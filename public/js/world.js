@@ -202,31 +202,87 @@ function numberTexture(n) {
   return t;
 }
 
+/**
+ * The helipad, marked the way a real one is: a white "H" inside the touchdown
+ * circle, an orange aiming ring outside it, and the whole thing worn by
+ * weather. The wear is what sells it — a perfectly clean pad reads as a decal,
+ * and this one is meant to have been rained on.
+ */
 function padTexture() {
   const c = noiseCanvas(512, (g, S) => {
+    const cx = S / 2;
+
+    // --- the slab, mottled rather than flat ---
     g.fillStyle = '#2b2f36';
     g.beginPath();
-    g.arc(S / 2, S / 2, S / 2 - 4, 0, Math.PI * 2);
+    g.arc(cx, cx, S / 2 - 4, 0, Math.PI * 2);
     g.fill();
+    for (let i = 0; i < 900; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * (S / 2 - 6);
+      const v = Math.random();
+      g.fillStyle = `rgba(${v > 0.5 ? '255,255,255' : '0,0,0'},${0.012 + Math.random() * 0.05})`;
+      g.beginPath();
+      g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 1 + Math.random() * 7, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    // --- aiming ring ---
     g.strokeStyle = '#ff7a1a';
-    g.lineWidth = 12;
+    g.lineWidth = 11;
     g.beginPath();
-    g.arc(S / 2, S / 2, S / 2 - 16, 0, Math.PI * 2);
+    g.arc(cx, cx, S / 2 - 15, 0, Math.PI * 2);
     g.stroke();
-    g.strokeStyle = 'rgba(242,245,251,0.92)';
-    g.lineWidth = 28;
+
+    // --- touchdown circle ---
+    g.strokeStyle = 'rgba(242,245,251,0.9)';
+    g.lineWidth = 9;
+    g.beginPath();
+    g.arc(cx, cx, S * 0.315, 0, Math.PI * 2);
+    g.stroke();
+
+    // --- the H ---
+    g.strokeStyle = 'rgba(242,245,251,0.94)';
+    g.lineWidth = 26;
     g.lineCap = 'butt';
     g.beginPath();
-    g.moveTo(S * 0.34, S * 0.28);
-    g.lineTo(S * 0.34, S * 0.72);
-    g.moveTo(S * 0.66, S * 0.28);
-    g.lineTo(S * 0.66, S * 0.72);
-    g.moveTo(S * 0.34, S * 0.5);
-    g.lineTo(S * 0.66, S * 0.5);
+    g.moveTo(S * 0.37, S * 0.31);
+    g.lineTo(S * 0.37, S * 0.69);
+    g.moveTo(S * 0.63, S * 0.31);
+    g.lineTo(S * 0.63, S * 0.69);
+    g.moveTo(S * 0.37, S * 0.5);
+    g.lineTo(S * 0.63, S * 0.5);
     g.stroke();
+
+    // --- corner ticks, so drift is readable from directly above ---
+    g.strokeStyle = 'rgba(242,245,251,0.55)';
+    g.lineWidth = 7;
+    for (let i = 0; i < 4; i++) {
+      const a = Math.PI / 4 + (i * Math.PI) / 2;
+      const r0 = S * 0.40;
+      const r1 = S * 0.455;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r0, cx + Math.sin(a) * r0);
+      g.lineTo(cx + Math.cos(a) * r1, cx + Math.sin(a) * r1);
+      g.stroke();
+    }
+
+    // --- weathering: scuffs over the paint, and rotor-wash streaks ---
+    g.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 160; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * (S / 2 - 8);
+      g.globalAlpha = 0.05 + Math.random() * 0.22;
+      g.beginPath();
+      g.arc(cx + Math.cos(a) * r, cx + Math.sin(a) * r, 2 + Math.random() * 12, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
   });
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
   return t;
 }
 
@@ -336,6 +392,15 @@ function container(scene, obstacles, x, z, color, yaw = 0) {
   return g;
 }
 
+/**
+ * Every tree currently in the scene, so the wind can move them.
+ *
+ * Trees only ever come from theme scenery, so this is emptied whenever the
+ * theme is rebuilt — otherwise switching arena between rounds would leave the
+ * discarded ones in here being animated forever.
+ */
+const TREES = [];
+
 function tree(scene, obstacles, x, z, h = 5, seed = 0) {
   const g = new THREE.Group();
   const rnd = (n) => Math.abs(Math.sin(seed * 12.9898 + n * 78.233)) % 1;
@@ -365,12 +430,43 @@ function tree(scene, obstacles, x, z, h = 5, seed = 0) {
 
   g.position.set(x, 0, z);
   g.rotation.y = rnd(2) * Math.PI * 2;
+
+  // Every tree gets its own phase and stiffness, so the tree line moves as a
+  // crowd rather than as one object. A thin tree bends further than a fat one.
+  g.userData.sway = {
+    phase: rnd(3) * Math.PI * 2,
+    rate: 0.8 + rnd(6) * 0.7,
+    give: (0.7 + rnd(7) * 0.6) / Math.max(1, h * 0.22),
+  };
+  TREES.push(g);
+
   scene.add(g);
   obstacles.push({
     min: { x: x - h * 0.28, y: h * 0.3, z: z - h * 0.28 },
     max: { x: x + h * 0.28, y: h * 0.92, z: z + h * 0.28 },
   });
   return g;
+}
+
+/**
+ * Lean every tree downwind and let it breathe.
+ *
+ * The lean is the steady part and the two sine terms are the gusting; using two
+ * at different rates stops it looking like a metronome. Trees are rotated from
+ * the base, which is close enough at this distance and costs nothing — no
+ * vertex work, just a Euler per tree per frame.
+ */
+function swayTrees(t, wind) {
+  const wx = wind?.x || 0;
+  const wz = wind?.z || 0;
+  const strength = Math.min(1, Math.hypot(wx, wz) / 9);
+  for (const tree of TREES) {
+    const s = tree.userData.sway;
+    const gust = 0.65 + 0.35 * Math.sin(t * s.rate + s.phase) + 0.18 * Math.sin(t * s.rate * 2.7 + s.phase * 1.7);
+    const lean = (0.035 + strength * 0.16) * s.give * gust;
+    tree.rotation.x = wz * lean;
+    tree.rotation.z = -wx * lean;
+  }
 }
 
 function fenceRun(scene, radius, segments = 72) {
@@ -708,14 +804,39 @@ export function buildWorld(scene) {
   apron.receiveShadow = true;
   scene.add(apron);
 
+  // The pad is a real slab standing a few centimetres proud of the apron, not a
+  // decal — the edge catches the sun and gives the drone something to be
+  // *above*, which is most of how you judge the last half metre of a landing.
+  const padSlab = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.1, 1.12, 0.06, 56),
+    new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95 })
+  );
+  padSlab.position.y = 0.03;
+  padSlab.receiveShadow = true;
+  padSlab.castShadow = true;
+  scene.add(padSlab);
+
   const pad = new THREE.Mesh(
     new THREE.CircleGeometry(1.05, 56),
     new THREE.MeshStandardMaterial({ map: padTexture(), roughness: 0.8, transparent: true })
   );
   pad.rotation.x = -Math.PI / 2;
-  pad.position.y = 0.02;
+  pad.position.y = 0.062;
   pad.receiveShadow = true;
   scene.add(pad);
+
+  // Perimeter lights. They breathe rather than blink: a hard blink at the edge
+  // of vision reads as an error, a slow pulse reads as "the pad is live".
+  const padLights = new THREE.Group();
+  const padLightMat = new THREE.MeshBasicMaterial({ color: 0x2fd39c, transparent: true, opacity: 0.9 });
+  const padLightGeo = new THREE.SphereGeometry(0.035, 8, 6);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const l = new THREE.Mesh(padLightGeo, padLightMat);
+    l.position.set(Math.cos(a) * 1.16, 0.07, Math.sin(a) * 1.16);
+    padLights.add(l);
+  }
+  scene.add(padLights);
 
   scene.add(pilotFigure());
 
@@ -735,6 +856,7 @@ export function buildWorld(scene) {
       disposeTree(themeGroup);
       obstacles.length -= themeObstacles;
     }
+    TREES.length = 0;   // the old theme's trees are gone with it
     themeGroup = new THREE.Group();
     const before = obstacles.length;
     buildScenery(id, { scene: themeGroup, obstacles, THREE, box, hangar, container, tree });
@@ -788,6 +910,8 @@ export function buildWorld(scene) {
 
   setTheme('field');
 
+  let clock = 0;   // seconds since the world was built, for anything that moves
+
   return {
     obstacles,
     rings: [], // tyres, filled in by the task layer
@@ -799,9 +923,21 @@ export function buildWorld(scene) {
     setTheme,
     get theme() { return themeId; },
     update(dt, wind) {
+      clock += dt;
       sock.update(wind || { x: 0, z: 0 });
       clouds.position.x += (wind?.x || 0) * dt * 1.6;
       clouds.position.z += (wind?.z || 0) * dt * 1.6;
+
+      // The tree line is the only thing on the field that shows you the wind
+      // before you feel it, which is exactly what it does on a real one.
+      swayTrees(clock, wind);
+
+      // Pad lights breathe, slightly out of phase around the ring.
+      for (let i = 0; i < padLights.children.length; i++) {
+        const p = 0.55 + 0.45 * Math.sin(clock * 1.6 - i * 0.5);
+        padLights.children[i].scale.setScalar(0.85 + p * 0.3);
+      }
+      padLightMat.opacity = 0.45 + 0.4 * Math.sin(clock * 1.6);
     },
   };
 }

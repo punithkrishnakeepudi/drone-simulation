@@ -124,6 +124,26 @@ export const GEOFENCE = { radius: 58, ceiling: 40 };
 
 const ROTOR_SPAN = 0.32; // used for ground effect and the collision radius
 
+/* Return-to-home. The cruise height clears the tallest tyre on any course and
+   the scenery around the field, so the way back is never through something. */
+const RTH_ALT = 8;
+const RTH_REF_SPEED = 12; // speed at which the approach brake is fully applied
+
+/* Flips, the way a Tello does them: a hop to buy room, a fast ballistic roll
+   through 360°, then catch it. The Tello refuses below 50% battery; so do we,
+   and it also wants height, because a flip costs about a metre. */
+const FLIP = { boost: 0.14, spin: 0.42, recover: 0.18 };
+const FLIP_MIN_BATTERY = 50;
+const FLIP_MIN_ALT = 1.5;
+
+/** Which angle a flip drives, and which way round. */
+const FLIP_DIRS = {
+  fwd:   { axis: 'pitch', sign: +1 },
+  back:  { axis: 'pitch', sign: -1 },
+  right: { axis: 'roll',  sign: +1 },
+  left:  { axis: 'roll',  sign: -1 },
+};
+
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -139,6 +159,8 @@ export class Drone {
 
   reset(pad = { x: 0, z: 0 }) {
     this.pos = { x: pad.x, y: 0.06, z: pad.z };
+    /** Where "home" is for return-to-home: the pad it was last placed on. */
+    this.home = { x: pad.x, z: pad.z };
     this.vel = { x: 0, y: 0, z: 0 };
     this.roll = 0;
     this.pitch = 0;
@@ -156,7 +178,12 @@ export class Drone {
     this.flightTime = 0;
     this.bumps = 0;
     this.bumpCooldown = 0;
-    this.autopilot = null; // 'takeoff' | 'land' | null
+    this.autopilot = null; // 'takeoff' | 'land' | 'rth' | 'flip' | null
+    this.rthStage = '';    // 'climb' | 'cruise' | 'descend', while autopilot is 'rth'
+    this.flipT = 0;        // seconds into the current flip
+    this.flipAxis = '';
+    this.flipSign = 1;
+    this.flipRefused = '';  // why the last flip request was turned down
     this.wind = { x: 0, y: 0, z: 0 };
     this.windDir = Math.random() * Math.PI * 2;
     this.gLoad = 1;
@@ -227,6 +254,107 @@ export class Drone {
   }
 
   /**
+   * Return to home — the one button every real drone has and every beginner
+   * needs, because the usual way a first flight ends is the drone somewhere
+   * out over the fence and the pilot with no idea which way is back.
+   *
+   * Three stages, the same order a real flight controller uses:
+   *   climb   — get above the tyres and the scenery before going anywhere
+   *   cruise  — fly home, nose pointed the way it is travelling
+   *   descend — once over the pad, put it down
+   */
+  returnHome() {
+    if (this.crashed || !this.airborne) return;
+    this.autopilot = 'rth';
+    this.rthStage = this.altitude < RTH_ALT - 0.4 ? 'climb' : 'cruise';
+    this.events.push('rth');
+  }
+
+  /** Distance from the home pad on the flat, metres. */
+  get homeDist() {
+    return Math.hypot(this.pos.x - this.home.x, this.pos.z - this.home.z);
+  }
+
+  /**
+   * A Tello-style flip. `dir` is 'fwd' | 'back' | 'left' | 'right'.
+   *
+   * Returns true if it is going to happen. The refusals are the interesting
+   * part: a flip is ballistic, so it costs about a metre of height and a good
+   * bite of battery, and a quad that tries one too low or too flat just breaks
+   * itself. `flipRefused` carries the reason so the UI can say it out loud.
+   */
+  flip(dir) {
+    const d = FLIP_DIRS[dir];
+    this.flipRefused = '';
+    if (!d || this.crashed) return false;
+    if (this.autopilot === 'flip') return false;           // one at a time
+    if (!this.airborne || !this.armed) {
+      this.flipRefused = 'Take off first';
+    } else if (this.battery < FLIP_MIN_BATTERY) {
+      this.flipRefused = `Needs ${FLIP_MIN_BATTERY}% battery`;
+    } else if (this.altitude < FLIP_MIN_ALT) {
+      this.flipRefused = `Climb to ${FLIP_MIN_ALT} m first`;
+    }
+    if (this.flipRefused) {
+      this.events.push('flip-refused');
+      return false;
+    }
+
+    this.autopilot = 'flip';
+    this.flipAxis = d.axis;
+    this.flipSign = d.sign;
+    this.flipT = 0;
+    this.events.push('flip');
+    return true;
+  }
+
+  /**
+   * One step of a flip. This bypasses the attitude PD loop entirely and drives
+   * the angle straight through 360°, because the loop has a tilt limit and the
+   * whole point of a flip is to go past it.
+   */
+  updateFlip(dt, p) {
+    const total = FLIP.boost + FLIP.spin + FLIP.recover;
+    this.flipT += dt;
+    const t = this.flipT;
+    let thr;
+
+    if (t < FLIP.boost) {
+      // Hop, to buy the height the inverted half is about to cost.
+      thr = 1;
+    } else if (t < FLIP.boost + FLIP.spin) {
+      // Through the roll. Thrust is near zero because for half of this the
+      // motors are pointing at the sky — this is the part that makes it drop.
+      thr = 0.1;
+      const u = (t - FLIP.boost) / FLIP.spin;
+      const a = 2 * Math.PI * u * this.flipSign;
+      if (this.flipAxis === 'pitch') { this.pitch = a; this.roll = 0; }
+      else { this.roll = a; this.pitch = 0; }
+    } else {
+      // Upright again: catch it before it hits anything.
+      this.roll = 0;
+      this.pitch = 0;
+      this.rollRate = 0;
+      this.pitchRate = 0;
+      thr = 1;
+    }
+
+    this.yawRateV = 0;
+    this.updateForces(dt, p, thr * 2 - 1, true);
+
+    if (t >= total) {
+      this.roll = 0;
+      this.pitch = 0;
+      this.rollRate = 0;
+      this.pitchRate = 0;
+      this.autopilot = null;
+      this.flipT = 0;
+      this.holdAlt = null;   // let altitude hold re-latch wherever it ended up
+      this.events.push('flip-done');
+    }
+  }
+
+  /**
    * @param {number} dt      seconds
    * @param {object} input   {roll,pitch,yaw,thr} each -1..1
    * @param {object} p       one of PROFILES
@@ -257,6 +385,12 @@ export class Drone {
       sRoll = sPitch = sYaw = 0;
       const target = this.altitude > 0.35 ? -0.55 : -0.3;
       sThr = p.altHold ? target : this.autoDescend(p);
+    } else if (this.autopilot === 'rth') {
+      const cmd = this.flyHome(p);
+      sRoll = cmd.roll;
+      sPitch = cmd.pitch;
+      sYaw = cmd.yaw;
+      sThr = cmd.thr;
     }
 
     if (!this.armed) {
@@ -269,8 +403,15 @@ export class Drone {
 
     this.flightTime += dt;
     this.updateWind(dt, p);
-    this.updateAttitude(dt, p, sRoll, sPitch, sYaw);
-    this.updateForces(dt, p, sThr);
+
+    // A flip drives the attitude itself and past the tilt limit, so it replaces
+    // the attitude loop rather than feeding it.
+    if (this.autopilot === 'flip') {
+      this.updateFlip(dt, p);
+    } else {
+      this.updateAttitude(dt, p, sRoll, sPitch, sYaw);
+      this.updateForces(dt, p, sThr);
+    }
     this.integrate(dt);
 
     this.fence();
@@ -339,11 +480,11 @@ export class Drone {
 
   /* ---------------- thrust, drag, gravity ---------------- */
 
-  updateForces(dt, p, sThr) {
+  updateForces(dt, p, sThr, raw = false) {
     const up = this.bodyUp();
     let thrCmd;
 
-    if (p.altHold) {
+    if (p.altHold && !raw) {
       // The flight controller works out the throttle for you — including the
       // extra it needs to stay level while the craft is tilted over.
       let targetVy;
@@ -406,6 +547,85 @@ export class Drone {
     const want = (targetVy - this.vel.y) * 3.4 + G;
     const t = clamp(want / (p.twr * G * Math.max(0.4, this.bodyUp().y)), 0, 1);
     return t * 2 - 1;
+  }
+
+  /**
+   * One step of return-to-home. Returns stick commands in the same -1..1 shape
+   * the pilot's sticks use, so the rest of the flight model is untouched — RTH
+   * flies the drone exactly the way a person would, it just holds the sticks
+   * itself. That also means wind still pushes it around on the way back, which
+   * is the honest behaviour.
+   */
+  flyHome(p) {
+    const dx = this.home.x - this.pos.x;
+    const dz = this.home.z - this.pos.z;
+    const dist = Math.hypot(dx, dz);
+
+    // --- stage machine ---
+    if (this.rthStage === 'climb' && this.altitude >= RTH_ALT - 0.3) this.rthStage = 'cruise';
+    if (this.rthStage === 'cruise' && dist < 0.6) this.rthStage = 'descend';
+    // Blown off the pad on the way down — go back and try again.
+    if (this.rthStage === 'descend' && dist > 2.2 && this.altitude > 1.2) this.rthStage = 'cruise';
+
+    if (this.rthStage === 'descend') {
+      const done = !this.airborne;
+      if (done) {
+        this.autopilot = null;
+        this.rthStage = '';
+      }
+      // Keep nudging back over the pad while it sinks.
+      const hold = this.holdToward(dx, dz, p, 0.35);
+      return {
+        roll: hold.roll,
+        pitch: hold.pitch,
+        yaw: 0,
+        thr: p.altHold ? (this.altitude > 0.35 ? -0.55 : -0.3) : this.autoDescend(p),
+      };
+    }
+
+    // --- climb and cruise ---
+    // Ease off as it arrives so it settles over the pad instead of sailing past.
+    const gain = this.rthStage === 'climb' ? 0 : Math.min(1, dist / 6);
+    const hold = this.holdToward(dx, dz, p, gain);
+
+    // Point the nose the way it is going. Not required, but it is what a real
+    // RTH does and it makes the last stretch readable from the ground.
+    let yaw = 0;
+    if (dist > 2) {
+      // Model faces -Z at yaw 0, so this is the heading that puts home ahead.
+      const want = Math.atan2(-dx, -dz);
+      let err = want - this.yaw;
+      err = Math.atan2(Math.sin(err), Math.cos(err));
+      yaw = clamp(err * 1.1, -0.7, 0.7);
+    }
+
+    const thr = p.altHold ? clamp((RTH_ALT - this.altitude) * 0.9, -0.6, 1) : this.autoThrottle(RTH_ALT, p);
+    return { roll: hold.roll, pitch: hold.pitch, yaw, thr };
+  }
+
+  /**
+   * Stick deflection that flies toward a world-frame offset. The sticks are
+   * relative to the nose, so the offset is rotated into the body frame first —
+   * the same mental step the pilot has to make, done properly.
+   */
+  holdToward(dx, dz, p, gain) {
+    if (gain <= 0) return { roll: 0, pitch: 0 };
+    const dist = Math.hypot(dx, dz) || 1;
+    // Unit vector to home, in the world.
+    const wx = dx / dist;
+    const wz = dz / dist;
+
+    // Project onto the body axes. Positive pitch accelerates along the nose and
+    // positive roll to the right, so these components are the sticks directly.
+    const n = this.nose();
+    const r = this.right();
+    const fwd = wx * n.x + wz * n.z;
+    const right = wx * r.x + wz * r.z;
+
+    // Bleed off speed as it closes so it does not overshoot the pad.
+    const brake = clamp(1 - this.speed / RTH_REF_SPEED, 0.15, 1);
+    const g = gain * brake;
+    return { roll: clamp(right * g, -1, 1), pitch: clamp(fwd * g, -1, 1) };
   }
 
   autoDescend(p) {

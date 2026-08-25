@@ -1,13 +1,19 @@
 {
   "name": "drone-trainer",
   "version": "1.0.0",
-  "description": "Real-time WebGL drone flight trainer with a phone-as-transmitter controller over LAN.",
+  "description": "Real-time WebGL drone flight trainer with a phone-as-transmitter controller.",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node tools/check-tracks.mjs"
+    "check": "node tools/check-tracks.mjs",
+    "test": "npm run test:physics && npm run test:server && npm run test:pairing && npm run test:arena",
+    "test:physics": "node tools/audit-physics.mjs",
+    "test:server": "node tools/audit-server.mjs",
+    "test:pairing": "node tools/audit-pairing.mjs",
+    "test:arena": "node tools/audit-arena.mjs",
+    "vendor": "cp node_modules/three/build/three.module.js public/vendor/three.module.js"
   },
   "dependencies": {
     "three": "^0.169.0",

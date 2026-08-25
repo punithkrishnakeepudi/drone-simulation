@@ -40,7 +40,9 @@ PORT=9000 PIN=4321 npm start
 ```
 
 No phone handy? Click **Fly with the keyboard** on the pairing screen.
-`W`/`S` throttle · `A`/`D` yaw · arrow keys pitch and roll · `T` take off · `L` land · `C` camera · `R` reset · `F` full screen · `V` drone camera.
+`W`/`S` throttle · `A`/`D` yaw · arrow keys pitch and roll · `T` take off · `L` land ·
+`H` return home · `1`–`4` flips · `C` camera · `R` reset · `M` switch mode ·
+`N` sound · `V` drone camera · `F` full screen · `Space` arm.
 
 Both screens go full screen: **F** or the *Full screen* chip on the laptop, and the
 expand button in the top-right corner of the phone transmitter. The phone strips
@@ -72,25 +74,58 @@ Every input is relative to the **drone's** nose, not to you. That is the single 
 | **Realistic** | No altitude hold. The left stick is raw throttle and stays where your thumb leaves it; the hover point is yours to hold. This is what real flying feels like. |
 | **Acro** | Rate mode. The sticks command rotation speed, not angle — let go and it stays where you put it. |
 
+### Return to home
+
+`Return home` on the phone, or **H**. Climbs to 8 m, flies back with the nose
+pointed the way it is going, and lands on the pad. Touching any stick cancels it
+and hands control straight back — the same rule every real drone follows. Wind
+still pushes it around on the way, because RTH here flies the sticks rather than
+teleporting.
+
+### Flips
+
+The four-way pad on the phone, or **1**–**4**. Forward, back, left and right in
+the style of a Tello: a hop to buy height, a ballistic 360° roll, then it catches
+itself. Refused below 50 % battery or 1.5 m, and the pad dims to match rather
+than letting you press into a rejection.
+
+### Sound and vibration
+
+The motor sound is **synthesised, not sampled** — four detuned motors whose
+blade-pass frequency rides the throttle and whose relative speeds follow your
+stick inputs, so you can hear the quad bite into a turn. It is positioned in 3D,
+so the drone gets quieter and lower as it flies away, and the nose camera puts
+you on top of the motors. No audio files, so it still works with no internet.
+Toggle with the *Sound* chip or **N**.
+
+The phone rumbles under the motors with the throttle, and has its own pattern for
+each event — a crash feels nothing like a tyre. Toggle with the vibration chip;
+long-press it to keep the events but drop the rumble. **iOS Safari has no
+vibration API at all, so on an iPhone the chip hides itself.**
+
 ---
 
-## The syllabus
+## Task mode
 
-Lessons are ordered so each adds exactly one skill:
+Five tyre courses. Task 1 walks you through every control step by step; 2–5 just
+run.
 
-1. **Hover** — take off, park it in the ring, hold for eight seconds, land on the pad.
-2. **Altitude** — left stick only. Climb, descend, stop on the number.
-3. **Left and right** — roll only, nose fixed away from you.
-4. **The box** — four corners at 2 m with a fixed nose.
-5. **Nose-in** — turn the nose to face you and fly it anyway. The lesson everyone skips and everyone needs.
-6. **Gate run** — five gates in order, in sport mode, timed.
-7. **Spot landing** — up to 8 m, then back on the pad inside 30 cm without a thump.
+| # | Course | Shape |
+|---|---|---|
+| 1 | Straight line | Guided · four tyres in a row |
+| 2 | Slalom | Five tyres, alternating left and right |
+| 3 | Staircase | Five tyres, up to 5 m and back down |
+| 4 | Circle | Six tyres around a 12 m ring |
+| 5 | Figure eight | Eight tyres, two loops, two heights |
+
+Fly the tyres in order, then land on the pad. Timed, with missed tyres and rim
+hits counted.
 
 **Free flight** has no objectives if you just want to mess around.
 
 ### Training aids
 
-Toggle them off in the Lessons sheet once you no longer need them.
+Toggle them off in the Tasks sheet once you no longer need them.
 
 - A ground shadow and a vertical drop line, so you can see where the drone actually is
 - A fading trail, so drift shows up before it becomes a problem
@@ -189,7 +224,10 @@ against that arena's scenery. Run it after moving a wall or a gate.
 
 **Some networks block device-to-device traffic.** Public and campus Wi-Fi often have client isolation on. Use the laptop hotspot instead — it is the reliable path and it needs no internet at all.
 
-**The page loads but says "Wrong pairing code."** The code changes each time the server restarts. Read the current one off the laptop screen, or pin it with `PIN=1234 npm start`.
+**The page loads but says "Wrong pairing code."** The code rolls whenever a
+session starts with nobody connected, so an old tab will have a stale one. Read
+the current one off the laptop, or pin it with `PIN=1234 npm start`. Five wrong
+guesses in a row locks that device out for a while.
 
 **Controls feel laggy.** Check the `LINK` readout on the phone. Under about 40 ms feels direct. If it is high, you are probably on a busy Wi-Fi network — switch to the hotspot.
 
@@ -199,7 +237,7 @@ against that arena's scenery. Run it after moving a wall or a gate.
 
 ```
 server.js              HTTP + WebSocket relay, seats, match state machine, QR
-tools/check-tracks.mjs track geometry check (npm run check)
+tools/                 track geometry check + the four audit suites (npm test)
 docs/MULTIPLAYER.md    the arena design, in full
 public/
   index.html           simulator page — free flight, tasks, arena
@@ -208,13 +246,14 @@ public/
   css/sim.css
   css/controller.css
   css/host.css
+  vendor/              three.module.js, vendored so there is no CDN at runtime
   js/
-    physics.js         flight model — tilt, drag, altitude hold, battery, collisions
-    missions.js        lesson definitions and the objective engine
+    physics.js         flight model — tilt, drag, altitude hold, RTH, flips, battery
     tasks.js           the five tyre courses and the ring/landing runner
     tracks.js          arena ring layouts + scoring — pure data, used by the server too
     arenas.js          the five arenas' scenery
     world.js           scene, swappable theme layer, drone model, markers, flight aids
+    audio.js           synthesised motor sound, positioned in 3D
     hud.js             canvas instruments — radar, altitude tape, stick mirrors
     net.js             WebSocket client with reconnect, shared by all three pages
     sim.js             render loop, cameras, input merging, telemetry, arena rounds
@@ -224,21 +263,71 @@ public/
 
 **The phone holds no flight state.** It sends stick positions and button presses; the simulator owns the physics and sends telemetry back. A dropped packet can never corrupt the flight, and if the link goes quiet for 600 ms the sticks centre themselves and — in Beginner and Sport — the drone simply holds its hover.
 
-**The flight model** is not a full 6-DOF rigid body sim. It models what you actually feel on a small quad: commanded tilt is reached with a first-order lag, tilt becomes horizontal acceleration (`a = g·tan θ`), linear drag sets the top speed, and vertical motion is a velocity controller in the altitude-hold modes and raw thrust in Manual. Physics runs on a fixed 120 Hz step, decoupled from the frame rate, so behaviour is identical on a fast and a slow machine.
+**The flight model** is not a full 6-DOF rigid body sim. It models what you actually feel on a small quad: commanded tilt is reached with a first-order lag, tilt becomes horizontal acceleration (`a = g·tan θ`), linear drag sets the top speed, and vertical motion is a velocity controller in the altitude-hold modes and raw thrust in Realistic. Physics runs on a fixed 120 Hz step, decoupled from the frame rate, so behaviour is identical on a fast and a slow machine.
 
-**Three.js is served from `node_modules`**, not a CDN, so the whole thing works on a hotspot with no internet connection.
+**Three.js is vendored into `public/vendor/`**, not loaded from a CDN, so the
+whole thing works on a hotspot with no internet and has no third-party runtime
+dependency. Re-vendor it after upgrading with `npm run vendor`.
 
-**Security is deliberately minimal** — a four-digit pairing code, and the
-simulator page is trusted without one when it is served to the machine running
-the server. Four digits is ten thousand guesses with no rate limiting behind it,
-so this is designed for your own hotspot and the room you are standing in. Do
-not put it on the open internet.
+---
+
+## Deploying
+
+The frontend is static; the relay has to be a real long-running process, so the
+two halves usually live on different hosts — Netlify plus Render, for example.
+
+`public/config.js` points the frontend at the relay. A page served from
+`localhost` or a private LAN address always talks to whoever served it, so local
+development needs no edits and you cannot accidentally test against production.
+
+**Set `SESSION_TOKEN` on the relay before putting it on the internet.** The
+pairing code is the only thing between a stranger and your session, and
+`/api/session` is what hands it out. On a laptop it answers over loopback only.
+Behind a proxy every request looks remote, so it requires the token instead:
+
+```bash
+SESSION_TOKEN=some-long-random-string
+```
+
+then open the simulator as `https://your-site/?token=some-long-random-string`.
+Without the token the endpoint refuses everyone, and the code has to be read out
+of the relay's logs by hand.
+
+Environment: `PORT`, `PIN`, `SESSION_TOKEN`, `BRIEFING_SECONDS`, `ROUND_SECONDS`,
+`RESULTS_SECONDS`.
+
+### Security, honestly
+
+- Every role — phone, screen and host — must present the pairing code.
+- Five wrong codes from one address start a doubling lockout, so a four-digit
+  code cannot be walked. The lockout is per address, so nobody can lock out the
+  room by guessing.
+- Frames are capped at 32 KB and socket errors are caught, so a malformed packet
+  drops one client instead of the process.
+- Arena traffic is routed between one phone and its own screen, never broadcast.
+- There are **no accounts and no personal data**. The worst a stranger with the
+  code can do is fly in your session or occupy a seat.
+- This has had no external security review. It is a training toy and should not
+  be treated as more than one.
+
+### Tests
+
+```bash
+npm test
+```
+
+157 checks in four suites — the flight model (every profile, both autopilots,
+geofence, battery, frame-rate independence), the HTTP and WebSocket surface
+(traversal, auth, brute force, malformed frames), solo pairing end to end, and a
+whole multi-pilot arena match including a pilot dropping out mid-round. They boot
+the real server and drive it over real sockets; nothing is mocked.
 
 ---
 
 ## Making it yours
 
-- **New lesson:** add an entry to `MISSIONS` in `missions.js`. The builders `hold`, `reach`, `climbAbove`, `descendBelow`, `landOn`, `faceThePilot` and `gateRun` cover most of what you need, and any objective is just `{ label, hint, marker, test(ctx, dt, mem) }` returning progress from 0 to 1.
+- **New course:** add an entry to `TASKS` in `tasks.js`, and a guided walk-through step to `GUIDE` if it needs coaching.
+- **New arena track:** add to `TRACKS` in `tracks.js` and its scenery in `arenas.js`, then run `npm run check`.
 - **New flight mode:** add a profile to `PROFILES` in `physics.js`. Tilt, yaw rate, climb rate, drag, expo, wind and forgiveness are all in one object.
 - **New scenery:** the `box`, `pylon` and `tree` helpers in `world.js` add a mesh and its collision volume together.
 - **Talking to a real Tello:** the controller already speaks a clean stick protocol. A bridge that maps `{r, p, y, t}` onto Tello's `rc a b c d` UDP command is roughly thirty lines of Node on the laptop side — but fly the lessons first.

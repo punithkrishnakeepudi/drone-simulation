@@ -21,6 +21,7 @@ import { buildWorld, buildDrone, buildFlightAids, courseLayer, PILOT_POS } from 
 import { drawRadar, drawAltTape, drawStick } from './hud.js';
 import { drawPathBox } from './pathbox.js';
 import { Link } from './net.js';
+import { DroneAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -262,6 +263,8 @@ function handleCommand(name, value) {
     case 'arm': drone.arm(!!value); break;
     case 'takeoff': drone.takeoff(); break;
     case 'land': drone.land(); break;
+    case 'rth': drone.returnHome(); break;
+    case 'flip': drone.flip(value); break;
     case 'reset': resetFlight(); break;
     case 'camera': cycleCamera(); break;
     case 'mode': setProfile(value); break;
@@ -297,18 +300,37 @@ const KEYMAP = {
   ArrowLeft: ['roll', -1], ArrowRight: ['roll', 1],
 };
 
+/** Flips are a phone control first, but the number row makes them testable. */
+const FLIP_KEYS = {
+  Digit1: 'fwd',
+  Digit2: 'back',
+  Digit3: 'left',
+  Digit4: 'right',
+};
+
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
+  // A key press is a gesture, which is the only moment audio may be started —
+  // this is what unlocks sound for a pilot who never touches the mouse.
+  ensureAudio();
   if (KEYMAP[e.code]) { keys[e.code] = 1; e.preventDefault(); }
   if (e.code === 'KeyT') drone.takeoff();
   if (e.code === 'KeyL') drone.land();
+  if (e.code === 'KeyH') drone.returnHome();
+  if (FLIP_KEYS[e.code]) drone.flip(FLIP_KEYS[e.code]);
   if (e.code === 'KeyR') resetFlight();
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyM') setSession(session === 'free' ? 'task' : 'free');
   if (e.code === 'Space') { drone.arm(!drone.armed); e.preventDefault(); }
   if (e.code === 'KeyF') toggleFullscreen();
   if (e.code === 'KeyV') setDroneCam(!dcamOn);
-  if (e.code === 'Escape') { $('tasks').hidden = true; }
+  if (e.code === 'KeyN') setSound(!soundOn);
+  if (e.code === 'Escape') {
+    $('tasks').hidden = true;
+    // Same rule as the button: Escape is a way out of the arena sheet unless a
+    // round is actually under way.
+    if (!$('arena-sheet').hidden && !$('ar-back').hidden) leaveArena();
+  }
 });
 addEventListener('keyup', (e) => { if (KEYMAP[e.code]) keys[e.code] = 0; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = 0; });
@@ -341,6 +363,23 @@ function gatherInput() {
   if (!PROFILES[profileKey].altHold && !fresh) {
     input.thr = kb.thr !== 0 ? kb.thr : hoverStick();
   }
+
+  // Touching a stick cancels return-to-home. Every real drone does this, and
+  // without it an autopilot the pilot cannot override is worse than none.
+  if (drone.autopilot === 'rth') {
+    const grabbed =
+      Math.abs(input.roll) > 0.15 || Math.abs(input.pitch) > 0.15 || Math.abs(input.yaw) > 0.15;
+    // Throttle is only a deliberate move when it is not just resting at hover.
+    const thrMoved = PROFILES[profileKey].altHold
+      ? Math.abs(input.thr) > 0.15
+      : Math.abs(input.thr - hoverStick()) > 0.25;
+    if (grabbed || thrMoved) {
+      drone.autopilot = null;
+      drone.rthStage = '';
+      fireEvent('rth-cancel');
+      toast('Return to home cancelled — you have the sticks');
+    }
+  }
 }
 
 /** Throttle stick value that roughly hovers, used as the keyboard neutral. */
@@ -361,7 +400,53 @@ function toast(text, good = false) {
   toastTimer = setTimeout(() => (el.hidden = true), 2600);
 }
 
+/* ---------------- sound ---------------- */
+
+const audio = new DroneAudio();
+let soundOn = (() => {
+  try { return localStorage.getItem('dt-sound') !== 'off'; } catch { return true; }
+})();
+
+/**
+ * Every browser refuses to start an AudioContext outside a real gesture, so
+ * this hangs off each route into the simulator rather than running at load.
+ */
+function ensureAudio() {
+  if (!soundOn) return;
+  audio.start();
+  audio.setMuted(false);
+  renderSoundChip();
+}
+
+function setSound(on) {
+  soundOn = on;
+  try { localStorage.setItem('dt-sound', on ? 'on' : 'off'); } catch { /* private mode */ }
+  if (on) audio.start();
+  audio.setMuted(!on);
+  renderSoundChip();
+}
+
+function renderSoundChip() {
+  const b = $('chip-sound');
+  if (!b) return;
+  b.setAttribute('aria-pressed', String(soundOn));
+  b.querySelector('span').textContent = soundOn ? 'Sound on' : 'Sound off';
+}
+
+/**
+ * One funnel for everything worth hearing or feeling. The counter is what lets
+ * the phone tell a fresh event from a repeat of the last one.
+ */
+let lastEvent = '';
+let eventSeq = 0;
+function fireEvent(name) {
+  lastEvent = name;
+  eventSeq++;
+  audio.event(name);
+}
+
 function onTaskEvent(kind) {
+  fireEvent(kind);
   if (kind === 'tyre') {
     pulse++;
     toast(`Tyre ${runner.at} of ${runner.tyres.length}`, true);
@@ -393,11 +478,15 @@ function drainDroneEvents() {
     if (scoring && (e === 'bump' || e === 'hard-landing')) arena.hits++;
     if (scoring && e === 'crash') arena.crashes++;
 
+    fireEvent(e);
+
     if (e === 'crash') toast(scoring ? `Crashed — ${drone.crashReason}` : `Crashed — ${drone.crashReason}. Press R to reset`);
     else if (e === 'hard-landing') toast('Hard landing — descend slower');
     else if (e === 'bump') pulse++;
     else if (e === 'fence') toast('Edge of the flying area');
     else if (e === 'battery-empty') toast('Battery empty — landing');
+    else if (e === 'rth') toast('Returning to home — touch a stick to take over', true);
+    else if (e === 'flip-refused') toast(drone.flipRefused || 'Cannot flip right now');
   }
   drone.events.length = 0;
 }
@@ -709,6 +798,9 @@ function showArenaSheet(kind) {
   sheet.hidden = false;
   table.hidden = true;
   count.hidden = true;
+  // Leaving mid-round would strand the rest of the team waiting on a score, so
+  // the way out is offered everywhere except during a countdown or a flight.
+  $('ar-back').hidden = kind === 'briefing' || kind === 'flying';
   $('ar-team').hidden = kind !== 'team';
   $('ar-code-strip').hidden = kind === 'team' || arena.isDefault;
   // 'HOME' is the relay's internal name for the shared room, not a team code.
@@ -1111,6 +1203,12 @@ function sendState(now) {
     cam: CAMS[camIndex].label,
     pulse,
     echo: phone.ts,
+    // Motor output drives the rumble in the pilot's hands; the event name and
+    // its counter let the phone pick a pattern and tell fresh from repeated.
+    thr: +drone.throttle.toFixed(3),
+    ev: lastEvent,
+    evn: eventSeq,
+    rth: drone.autopilot === 'rth',
     // Mirrored to the phone so the pilot never has to look up at the screen.
     arena:
       session === 'arena'
@@ -1180,6 +1278,14 @@ function frame(now) {
   if (aidsOn || trailOn) aids.update(dt, drone.pos);
   world.update(dt, drone.wind);
   updateCamera(dt);
+
+  // After updateCamera, and with the world matrix forced current, so the
+  // listener is not a frame behind the view. The drone is heard from wherever
+  // the camera is: the nose view puts you on top of the motors, the pilot view
+  // leaves them out at the far fence.
+  camera.updateMatrixWorld();
+  audio.update(dt, drone, PROFILES[profileKey], input, camera);
+
   updateHUD();
   sendState(now);
 
@@ -1219,9 +1325,13 @@ function buildModePicker() {
 }
 
 for (const b of document.querySelectorAll('.mode-card')) {
-  b.onclick = () => setSession(b.dataset.session);
+  b.onclick = () => {
+    ensureAudio();          // committing to fly — this click is the gesture
+    setSession(b.dataset.session);
+  };
 }
 
+$('chip-sound').onclick = () => setSound(!soundOn);
 $('btn-full').onclick = toggleFullscreen;
 $('btn-dcam').onclick = () => setDroneCam(!dcamOn);
 
@@ -1243,6 +1353,22 @@ $('ar-code').addEventListener('input', () => {
   $('ar-code').value = $('ar-code').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
 });
 $('ar-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('ar-join').click(); });
+/**
+ * Back out of the arena entirely: drop the seat so the team is not holding one
+ * open for a screen that has wandered off, then hand back to the mode picker.
+ */
+function leaveArena() {
+  if (arena.team || arena.seat != null) link.send({ t: 'team/leave' });
+  arena.phase = 'lobby';
+  $('arena-sheet').hidden = true;
+  $('arena-bar').hidden = true;
+  started = false;
+  $('hud').hidden = true;
+  $('modes').hidden = false;
+}
+
+$('ar-back').onclick = leaveArena;
+
 $('ar-leave').onclick = () => {
   rememberTeam('');
   link.send({ t: 'team/leave' });
@@ -1258,24 +1384,57 @@ $('guide-skip').onclick = () => {
 $('opt-aids').onchange = (e) => setAids(e.target.checked);
 $('opt-trail').onchange = (e) => setTrail(e.target.checked);
 $('pair-skip').onclick = () => {
+  ensureAudio();
   leavePairing();
   $('modes').hidden = false;
 };
 
+// A simulator in a background tab should not keep four oscillators running.
+document.addEventListener('visibilitychange', () => {
+  audio.setAwake(document.visibilityState === 'visible');
+});
+
+/**
+ * Fetch the session code and pair with it.
+ *
+ * The screen authenticates with the same code as the phone, so this is also
+ * what gets the screen onto the relay: the link sits idle until a code arrives.
+ * A token in the page URL is passed straight through — that is what authorises
+ * reading the code at all when the relay is on a public host.
+ */
 async function loadSession() {
+  const api = typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '';
+  const token = params.get('token') || '';
+  const urlPin = params.get('pin') || '';
+
   try {
-    const res = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + '/api/session');
-    if (!res.ok) throw new Error('not local');
+    const q = token ? `?token=${encodeURIComponent(token)}` : '';
+    const res = await fetch(`${api}/api/session${q}`);
+    if (!res.ok) {
+      const why = await res.json().catch(() => ({}));
+      throw new Error(why.error || 'refused');
+    }
     const s = await res.json();
     $('pair-pin').textContent = s.pin;
     const controllerUrl = `${window.location.origin}/controller.html?pin=${s.pin}`;
     $('pair-url').textContent = `${window.location.origin}/controller.html`;
-    const svg = await fetch((typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/qr.svg?url=${encodeURIComponent(controllerUrl)}`);
+    if (link.pin !== s.pin) link.repair(s.pin);
+
+    const svg = await fetch(`${api}/api/qr.svg?url=${encodeURIComponent(controllerUrl)}`);
     if (svg.ok) $('qr').innerHTML = await svg.text();
     else $('qr').remove();
-  } catch {
-    $('pair-url').textContent = 'Open this page on the computer running the server';
+  } catch (err) {
+    // No code from the relay. A code in the page URL is the fallback, which is
+    // how extra pilot screens join an arena someone else already started.
+    if (urlPin) {
+      $('pair-pin').textContent = urlPin;
+      $('pair-url').textContent = `${window.location.origin}/controller.html`;
+      if (link.pin !== urlPin) link.repair(urlPin);
+      return;
+    }
+    $('pair-url').textContent = String(err.message || 'Could not reach the relay');
     $('pair-pin').textContent = '––––';
+    $('qr')?.remove();
   }
 }
 
@@ -1289,5 +1448,6 @@ setTrail(false);
 $('task-card').classList.add('free');
 $('btn-tasks').hidden = true;
 renderTaskCard();
+renderSoundChip();
 loadSession();
 requestAnimationFrame(frame);

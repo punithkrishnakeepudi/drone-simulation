@@ -2,3 +2,10 @@ node_modules/
 .DS_Store
 *.log
 .env
+
+# local tooling scratch
+.playwright-mcp/
+.claude-flow/
+.swarm/
+ruvector.db
+netlify_site.json

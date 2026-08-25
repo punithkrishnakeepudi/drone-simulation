@@ -32,6 +32,17 @@ export class Link {
 
   connect() {
     if (this.denied) return;
+    // Every role has to present the pairing code now, so connecting without one
+    // just earns a refusal. Wait until there is something to present — the
+    // simulator gets its code from /api/session a moment after the page loads.
+    if (!this.pin) {
+      this.status = 'offline';
+      // Deferred: connect() runs from the constructor, so a synchronous
+      // callback here would fire before the caller's `const link = new Link(…)`
+      // has been assigned, and the handler almost certainly reads it.
+      queueMicrotask(() => this.onStatus?.('offline'));
+      return;
+    }
 
     const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
     let ws;

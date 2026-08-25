@@ -114,6 +114,14 @@
     <div class="tele link"><span class="k">LINK</span><span class="v" id="t-link">–</span></div>
     <button id="b-session" class="chip">Free</button>
     <button id="b-mode" class="chip">Realistic</button>
+    <button id="b-haptic" class="chip icon" aria-label="Vibration" aria-pressed="true" title="Vibration (long press: rumble only)" hidden>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="5" width="6" height="14" rx="1.6" />
+        <path d="M5.5 8.5a6 6 0 0 0 0 7M2.5 6a10 10 0 0 0 0 12M18.5 8.5a6 6 0 0 1 0 7M21.5 6a10 10 0 0 1 0 12" />
+        <line class="hz-off" x1="3.5" y1="20.5" x2="20.5" y2="3.5" />
+      </svg>
+    </button>
     <button id="b-full" class="chip icon" aria-label="Full screen" aria-pressed="false" hidden>
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -166,6 +174,18 @@
     <div class="deck">
       <button id="b-fly" class="primary">Take off</button>
       <button id="b-motors" class="small" aria-pressed="false">Motors</button>
+      <button id="b-rth" class="small rth">Return home</button>
+
+      <!-- Flips, laid out the way they fly: press the direction it should go.
+           Disabled below 50% battery or too near the ground, same as a Tello. -->
+      <div class="flips" id="flips" aria-label="Flips">
+        <button class="flip" data-flip="fwd"   aria-label="Flip forward">▲</button>
+        <button class="flip" data-flip="left"  aria-label="Flip left">◀</button>
+        <span class="flip-mid" id="flip-mid">FLIP</span>
+        <button class="flip" data-flip="right" aria-label="Flip right">▶</button>
+        <button class="flip" data-flip="back"  aria-label="Flip back">▼</button>
+      </div>
+
       <div class="row">
         <button id="b-view" class="small">View</button>
         <button id="b-reset" class="small">Reset</button>

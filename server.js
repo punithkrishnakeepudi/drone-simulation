@@ -24,8 +24,101 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 8080);
 
-// A short pairing code so a stray device on the hotspot can't grab your sticks.
-const PIN = String(process.env.PIN || Math.floor(1000 + Math.random() * 9000));
+/**
+ * A short pairing code so a stray device on the hotspot can't grab your sticks.
+ *
+ * This rolls per session rather than per process. Generating it once at startup
+ * looks fine on a laptop you restart all the time, but on a hosted server the
+ * process runs for weeks and every pilot who ever loaded the page keeps a
+ * working code forever. So: a fresh simulator asking for a session with no
+ * phone attached gets a new one. While a phone is actually paired it is left
+ * alone, because rolling it mid-flight would kick that phone off.
+ *
+ * Setting PIN in the environment pins it and turns all of this off.
+ */
+const PIN_FIXED = !!process.env.PIN;
+let PIN = String(process.env.PIN || newPin());
+
+function newPin() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+/**
+ * Screens and phones currently on the relay. Zero means the field is empty and
+ * whoever is asking is starting fresh.
+ *
+ * This counts screens as well as phones on purpose: the arena runs up to five
+ * pilot screens, and if every one of them rolled the code on load, the first
+ * four would all be showing a code that no longer works.
+ */
+function clientsOnline() {
+  let n = 0;
+  for (const c of wss.clients) {
+    if (c.readyState === 1 && (c.role === 'ctrl' || c.role === 'sim')) n++;
+  }
+  return n;
+}
+
+function rollPin() {
+  if (PIN_FIXED || clientsOnline() > 0) return PIN;
+  PIN = newPin();
+  console.log(`  ~ new pairing code: ${PIN}`);
+  return PIN;
+}
+
+/**
+ * Guessing throttle.
+ *
+ * A four-digit code is 9000 possibilities, which an unthrottled attacker walks
+ * in well under a minute. Locking the code itself out would let anyone deny
+ * service to the room, so the lockout is per source address: five bad guesses
+ * buys a growing timeout for that address only, and a correct guess clears it.
+ */
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_BASE_MS = 15_000;
+const LOCKOUT_MAX_MS = 10 * 60_000;
+const attempts = new Map(); // ip -> { bad, until }
+
+/** Behind Render/Netlify the socket address is the proxy, so trust the header. */
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function checkPin(ws, req, given) {
+  const ip = clientIp(req);
+  const rec = attempts.get(ip) || { bad: 0, until: 0 };
+  const now = Date.now();
+
+  if (rec.until > now) {
+    const secs = Math.ceil((rec.until - now) / 1000);
+    sendTo(ws, { t: 'denied', reason: `Too many wrong codes — wait ${secs}s` });
+    ws.close();
+    return false;
+  }
+
+  if (String(given) !== PIN) {
+    rec.bad++;
+    if (rec.bad >= MAX_ATTEMPTS) {
+      const over = rec.bad - MAX_ATTEMPTS;
+      rec.until = now + Math.min(LOCKOUT_MAX_MS, LOCKOUT_BASE_MS * 2 ** over);
+    }
+    attempts.set(ip, rec);
+    sendTo(ws, { t: 'denied', reason: 'Wrong pairing code' });
+    ws.close();
+    return false;
+  }
+
+  attempts.delete(ip);
+  return true;
+}
+
+// Forget quiet addresses so the map cannot grow without bound.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of attempts) if (rec.until < now - 60 * 60_000) attempts.delete(ip);
+}, 5 * 60_000).unref();
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -49,7 +142,24 @@ function lanAddresses() {
 
 function isLoopback(req) {
   const ip = req.socket.remoteAddress || '';
+  // A forwarded request arrived through a proxy, so the socket address is the
+  // proxy's and says nothing about who actually asked. Treat it as remote.
+  if (req.headers['x-forwarded-for']) return false;
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+/** Shared secret for handing out codes when loopback is not meaningful. */
+const SESSION_TOKEN = process.env.SESSION_TOKEN || '';
+
+function sessionAllowed(req, url) {
+  if (isLoopback(req)) return true;
+  if (!SESSION_TOKEN) return false;
+  const given = url.searchParams.get('token') || req.headers['x-session-token'] || '';
+  // Constant-time-ish: compare full length rather than bailing on first mismatch.
+  if (given.length !== SESSION_TOKEN.length) return false;
+  let diff = 0;
+  for (let i = 0; i < SESSION_TOKEN.length; i++) diff |= given.charCodeAt(i) ^ SESSION_TOKEN.charCodeAt(i);
+  return diff === 0;
 }
 
 function send(res, code, body, type = 'text/plain; charset=utf-8') {
@@ -91,9 +201,38 @@ const server = http.createServer((req, res) => {
     return serveFile(res, p);
   }
 
-  // The simulator asks for the pairing code. Only the machine running the
-  // server can read it; the phone has to be told the code by a human.
+  /**
+   * The pairing code, handed to the screen that is starting a session.
+   *
+   * This is the whole authentication story, so who may read it decides whether
+   * the relay is protected at all:
+   *
+   *   on a laptop — only the machine running the server, over loopback. The
+   *     phone is told the code by a human reading it off the screen.
+   *
+   *   on a public host — loopback means nothing (every request arrives from the
+   *     platform's proxy), so it takes a shared secret. Set SESSION_TOKEN in the
+   *     environment and open the simulator as `/?token=…`. Without that, an
+   *     open endpoint would hand the code to anyone who found the URL, and the
+   *     code would be decoration.
+   */
   if (pathname === '/api/session') {
+    if (!sessionAllowed(req, url)) {
+      return send(
+        res,
+        403,
+        JSON.stringify({
+          error: SESSION_TOKEN
+            ? 'This link needs the session token.'
+            : 'Set SESSION_TOKEN on the server to hand out codes over the internet, or open the simulator on the machine running it.',
+        }),
+        MIME['.json']
+      );
+    }
+    // Opening the simulator with no phone attached starts a new session, and a
+    // new session gets a new code. `?keep` is for a page that is only
+    // re-reading the current one (the host screen) rather than starting over.
+    if (!url.searchParams.has('keep')) rollPin();
     const urls = lanAddresses().map((a) => `http://${a.address}:${PORT}/controller.html?pin=${PIN}`);
     return send(res, 200, JSON.stringify({ pin: PIN, port: PORT, urls }), MIME['.json']);
   }
@@ -520,7 +659,22 @@ function abortMatch(team) {
 }
 
 // --- WebSocket relay ---------------------------------------------------------
-const wss = new WebSocketServer({ server });
+/**
+ * `maxPayload` matters more than it looks: the default is 100 MB, and a control
+ * packet is a couple of hundred bytes. Anything larger is either a bug or an
+ * attempt to exhaust the heap, and 32 KB leaves generous headroom over the
+ * largest real message (a round result).
+ */
+const wss = new WebSocketServer({ server, maxPayload: 32 * 1024 });
+
+/**
+ * A socket-level error — a truncated frame, a bad opcode, a reset connection —
+ * is emitted as 'error' on the WebSocket. With no listener, EventEmitter
+ * rethrows it and takes the whole process down, which means any client can kill
+ * the relay with one malformed frame. These three listeners are the difference
+ * between a dropped client and a dropped service.
+ */
+wss.on('error', (err) => console.error('  ! relay error:', err.message));
 
 wss.on('connection', (ws, req) => {
   ws.role = null;
@@ -529,6 +683,10 @@ wss.on('connection', (ws, req) => {
   ws.callsign = '';
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
+  ws.on('error', (err) => {
+    console.error(`  ! socket error (${ws.role || 'unknown'}): ${err.message}`);
+    try { ws.terminate(); } catch { /* already gone */ }
+  });
 
   ws.on('message', (raw) => {
     let m;
@@ -537,6 +695,9 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
+    // JSON.parse happily returns null, a number, or an array. Only an object
+    // has fields worth reading, and `null.t` would throw.
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return;
 
     if (m.t === 'hello') return onHello(ws, req, m);
     if (!ws.role) return;
@@ -626,12 +787,16 @@ wss.on('connection', (ws, req) => {
 function onHello(ws, req, m) {
   const role = m.role === 'sim' ? 'sim' : m.role === 'host' ? 'host' : 'ctrl';
 
-  // Everyone must present the pin except the simulator (which reads it from /api/session).
-  // Now that we're on the cloud, the sim doesn't need to be loopback.
-  if (role !== 'sim' && String(m.pin) !== PIN) {
-    sendTo(ws, { t: 'denied', reason: 'Wrong pairing code' });
-    return ws.close();
-  }
+  /**
+   * Every role presents the code, screens included.
+   *
+   * The old rule exempted 'sim' because on a laptop the simulator read the code
+   * straight off the loopback API and a phone could not. Once this moved to a
+   * public host that exemption became "anyone on the internet may join as a
+   * screen", which is no authentication at all. The screen now carries the code
+   * in its URL exactly like the phone does.
+   */
+  if (!checkPin(ws, req, m.pin)) return;
 
   ws.role = role;
   ws.callsign = String(m.callsign || '').trim().slice(0, 12);

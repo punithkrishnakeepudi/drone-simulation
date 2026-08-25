@@ -239,6 +239,10 @@ h1 { font-family: var(--display); font-size: 27px; font-weight: 600; margin: 0; 
 .chip.icon[aria-pressed='true'] { border-color: var(--signal); color: var(--signal); }
 .chip.icon[aria-pressed='true'] .fs-in { display: none; }
 .chip.icon[aria-pressed='true'] .fs-out { display: inline; }
+/* The vibration chip is struck through when it is off, rather than swapping
+   glyphs — "off" is the state worth being obvious about here. */
+.chip.icon .hz-off { display: none; }
+.chip.icon[aria-pressed='false'] .hz-off { display: inline; }
 
 .linkwarn {
   flex: none;
@@ -419,6 +423,50 @@ h1 { font-family: var(--display); font-size: 27px; font-weight: 600; margin: 0; 
   gap: var(--s2);
 }
 .deck .row { display: flex; gap: var(--s2); }
+
+/* ---------- flips ---------- */
+/* A three-by-three cross, so the button you press is the way the drone goes. */
+.flips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, auto);
+  gap: 3px;
+  flex: none;
+}
+.flips .flip:nth-of-type(1) { grid-area: 1 / 2; }   /* fwd   */
+.flips .flip:nth-of-type(2) { grid-area: 2 / 1; }   /* left  */
+.flips .flip-mid            { grid-area: 2 / 2; }
+.flips .flip:nth-of-type(3) { grid-area: 2 / 3; }   /* right */
+.flips .flip:nth-of-type(4) { grid-area: 3 / 2; }   /* back  */
+
+.flip {
+  min-height: 30px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.flip:active { background: var(--signal); border-color: var(--signal); color: var(--ink); }
+.flip-mid {
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+
+/* Off below 50% battery or too low — pressing then would just break the drone,
+   so the whole cluster dims rather than failing silently on the laptop. */
+.flips.off .flip { opacity: 0.3; pointer-events: none; }
+.flips.off .flip-mid { color: var(--alarm); }
+
+.small.rth { font-size: 12px; }
+.small.rth[aria-pressed='true'] { border-color: var(--mint); color: var(--mint); }
 /* Column flex would stretch these to fill the height — the deck is a button
    cluster, not a bar chart. Only the row's children may share width. */
 .deck > .small, .deck > .primary, .deck > .row { flex: none; }
@@ -568,9 +616,18 @@ body.immersive .gimbal { border-radius: 6px; }
   #tx { gap: var(--s1); }
   .task p { -webkit-line-clamp: 1; margin-bottom: 4px; }
   .hint { -webkit-line-clamp: 1; }
-  .deck { width: 116px; }
+  .deck { width: 116px; gap: 4px; }
   .deck .primary { font-size: 15px; padding: var(--s2); }
   .small { font-size: 12px; }
+  /* Six controls in a column on a 390 px-tall phone: the deck has to give up
+     its generous tap heights or it pushes Reset off the bottom of the screen.
+     The gimbals keep theirs — those are the ones you fly with. */
+  .deck > .small, .deck .row > .small { min-height: 32px; padding: 4px var(--s1); }
+  .deck .primary { min-height: 36px; }
+  .small.rth { font-size: 11px; }
+  .flip { min-height: 22px; font-size: 10px; }
+  .flips { gap: 2px; }
+  .flip-mid { font-size: 7px; }
   .strip { padding: 3px var(--s2); gap: var(--s2); }
   .tele .v { font-size: 15px; }
   h1 { font-size: 22px; }
