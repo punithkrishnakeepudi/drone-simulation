@@ -153,7 +153,7 @@ const SESSION_TOKEN = process.env.SESSION_TOKEN || '';
 
 function sessionAllowed(req, url) {
   if (isLoopback(req)) return true;
-  if (!SESSION_TOKEN) return false;
+  if (!SESSION_TOKEN) return true; // Allow public access if no token is configured
   const given = url.searchParams.get('token') || req.headers['x-session-token'] || '';
   // Constant-time-ish: compare full length rather than bailing on first mismatch.
   if (given.length !== SESSION_TOKEN.length) return false;
